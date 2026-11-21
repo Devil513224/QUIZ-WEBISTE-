@@ -1,0 +1,6 @@
+{
+  "name": "Learn With TG",
+  "description": "Free exam preparation platform for competitive exam students across India. Learn Smart, Grow Every Day.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

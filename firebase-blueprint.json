@@ -1,0 +1,340 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted admin allowlist document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Publicly isolated non-PII student profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 3, "maxLength": 80 },
+        "targetExam": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "preferredLang": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Active", "Suspended"] },
+        "points": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "targetExam", "preferredLang", "status", "points", "createdAt", "updatedAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Isolated PII document storing user email.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Student saved materials, completed lessons, syllabus progress, typing and quiz attempts, and planner targets.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "savedMaterials": { "type": "array" },
+        "completedLessons": { "type": "array" },
+        "syllabusChecked": { "type": "array" },
+        "typingHistory": { "type": "array" },
+        "testHistory": { "type": "array" },
+        "planner": { "type": "object" },
+        "readNotifIds": { "type": "array" },
+        "clearedNotifIds": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "savedMaterials", "completedLessons", "syllabusChecked", "typingHistory", "testHistory", "planner", "readNotifIds", "clearedNotifIds", "updatedAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Multiple-choice question in the Question Bank.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "subjectKey": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "subjectName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "question": { "type": "string", "minLength": 3, "maxLength": 1000 },
+        "options": { "type": "array" },
+        "correctIndex": { "type": "number" },
+        "explanation": { "type": "string", "maxLength": 1200 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "subjectKey", "subjectName", "question", "options", "correctIndex", "explanation", "published", "updatedAt"]
+    },
+    "TestDefinition": {
+      "title": "TestDefinition",
+      "description": "Quiz, mock test, sectional test, or previous-year paper configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["Daily Quiz", "Mock Test", "Sectional Test", "Previous-Year Paper", "Custom Practice"] },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "subjectKeys": { "type": "array" },
+        "questionIds": { "type": "array" },
+        "minutes": { "type": "number" },
+        "negativeMarking": { "type": "number" },
+        "note": { "type": "string", "maxLength": 400 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "name", "subjectKeys", "minutes", "negativeMarking", "published", "updatedAt"]
+    },
+    "StudyMaterial": {
+      "title": "StudyMaterial",
+      "description": "Free study material PDF entry with uploaded Storage/data PDF or external URL.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "subject": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "pages": { "type": "number" },
+        "summary": { "type": "string", "maxLength": 1200 },
+        "fileName": { "type": "string", "maxLength": 200 },
+        "fileSizeBytes": { "type": "number" },
+        "pdfUrl": { "type": "string", "maxLength": 2048 },
+        "pdfDataUrl": { "type": "string", "maxLength": 920000 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "subject", "pages", "summary", "published", "updatedAt"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Free structured video course with lessons.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "lessons": { "type": "array" },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "description", "lessons", "published", "updatedAt"]
+    },
+    "CurrentAffair": {
+      "title": "CurrentAffair",
+      "description": "Daily, weekly, or monthly current affairs headline.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 220 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "period": { "type": "string", "enum": ["Daily", "Weekly", "Monthly"] },
+        "date": { "type": "string", "maxLength": 32 },
+        "summary": { "type": "string", "maxLength": 1200 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "category", "period", "date", "summary", "published", "updatedAt"]
+    },
+    "JobUpdate": {
+      "title": "JobUpdate",
+      "description": "Government job, admit card, result, answer key, or exam date update.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tab": { "type": "string", "enum": ["Vacancies", "Admit Cards", "Results", "Answer Keys", "Exam Dates"] },
+        "title": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "organization": { "type": "string", "maxLength": 140 },
+        "publishedDate": { "type": "string", "maxLength": 32 },
+        "startDate": { "type": "string", "maxLength": 32 },
+        "deadline": { "type": "string", "maxLength": 32 },
+        "eligibility": { "type": "string", "maxLength": 500 },
+        "officialLink": { "type": "string", "maxLength": 1024 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tab", "title", "organization", "publishedDate", "startDate", "deadline", "eligibility", "published", "updatedAt"]
+    },
+    "Banner": {
+      "title": "Banner",
+      "description": "Homepage hero or promotional banner managed by admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 400 },
+        "buttonText": { "type": "string", "maxLength": 60 },
+        "bgColor": { "type": "string", "maxLength": 32 },
+        "align": { "type": "string", "enum": ["left", "center", "right"] },
+        "visible": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "subtitle", "buttonText", "bgColor", "align", "visible", "updatedAt"]
+    },
+    "HomepageSection": {
+      "title": "HomepageSection",
+      "description": "Homepage section ordering, heading, and visibility.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "key": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "heading": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "order": { "type": "number" },
+        "visible": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "key", "name", "heading", "order", "visible", "updatedAt"]
+    },
+    "NotificationDoc": {
+      "title": "NotificationDoc",
+      "description": "Student notification broadcast managed by admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "numericId": { "type": "number" },
+        "type": { "type": "string", "maxLength": 60 },
+        "title": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 800 },
+        "audience": { "type": "string", "maxLength": 80 },
+        "date": { "type": "string", "maxLength": 32 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "numericId", "type", "title", "message", "audience", "date", "published", "updatedAt"]
+    },
+    "TypingPassage": {
+      "title": "TypingPassage",
+      "description": "Typing practice passage in English, Bengali, or Hindi.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "lang": { "type": "string", "enum": ["en", "bn", "hi"] },
+        "langLabel": { "type": "string", "maxLength": 40 },
+        "text": { "type": "string", "minLength": 10, "maxLength": 4000 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "lang", "langLabel", "text", "published", "updatedAt"]
+    },
+    "CatalogRow": {
+      "title": "CatalogRow",
+      "description": "Admin-managed exam, subject, category, or site setting entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "kind": { "type": "string", "enum": ["exams", "subjects", "categories", "sitesettings"] },
+        "col1": { "type": "string", "maxLength": 160 },
+        "col2": { "type": "string", "maxLength": 300 },
+        "col3": { "type": "string", "maxLength": 300 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "kind", "col1", "col2", "published", "updatedAt"]
+    },
+    "AdminReport": {
+      "title": "AdminReport",
+      "description": "Admin-only report entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "period": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "maxLength": 40 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "period", "status", "published", "updatedAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Admin audit trail log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "time": { "type": "string", "maxLength": 40 },
+        "who": { "type": "string", "maxLength": 160 },
+        "act": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "time", "who", "act", "published", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Trusted admin allowlist documents."
+    },
+    "/usersPublic/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Publicly isolated non-PII student profiles."
+    },
+    "/usersPrivate/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Isolated user PII documents."
+    },
+    "/userProgress/{userId}": {
+      "schema": { "$ref": "#/entities/UserProgress" },
+      "description": "Per-student saved materials, completed lessons, tests, typing, and planner."
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Question Bank MCQ items."
+    },
+    "/tests/{testId}": {
+      "schema": { "$ref": "#/entities/TestDefinition" },
+      "description": "Quizzes, mock tests, sectional tests, and PYQ definitions."
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/StudyMaterial" },
+      "description": "Free study materials and uploaded PDF entries."
+    },
+    "/courses/{courseId}": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Free video course catalog."
+    },
+    "/affairs/{affairId}": {
+      "schema": { "$ref": "#/entities/CurrentAffair" },
+      "description": "Current affairs feed."
+    },
+    "/jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/JobUpdate" },
+      "description": "Government job, admit card, result, answer key, and exam date updates."
+    },
+    "/banners/{bannerId}": {
+      "schema": { "$ref": "#/entities/Banner" },
+      "description": "Homepage promotional banners."
+    },
+    "/homepageSections/{sectionId}": {
+      "schema": { "$ref": "#/entities/HomepageSection" },
+      "description": "Homepage section visibility and order configuration."
+    },
+    "/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/NotificationDoc" },
+      "description": "Student notification feed."
+    },
+    "/typingPassages/{passageId}": {
+      "schema": { "$ref": "#/entities/TypingPassage" },
+      "description": "Typing practice passages in English, Bengali, and Hindi."
+    },
+    "/catalogRows/{rowId}": {
+      "schema": { "$ref": "#/entities/CatalogRow" },
+      "description": "Admin-managed exam, subject, category, and site setting entries."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/AdminReport" },
+      "description": "Admin-only summary reports."
+    },
+    "/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Admin-only audit logs."
+    }
+  }
+}
