@@ -94,28 +94,28 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f8fafc] text-[#0f172a] dark:bg-[#0b1730] dark:text-[#f1f5f9]">
+    <div className="flex min-h-screen flex-col overflow-x-clip bg-[#f8fafc] text-[#0f172a] dark:bg-[#0b1730] dark:text-[#f1f5f9]">
       {/* Announcement Bar */}
-      <div className="bg-[#102544] px-4 py-2 text-center text-xs sm:text-sm text-white">
+      <div className="bg-[#102544] px-3 py-2 text-center text-[11px] leading-snug text-white sm:px-4 sm:text-sm">
         <span className="font-bold text-[#facc15]">{t.brand.freeBannerPrefix}</span>{' '}
         <span className="text-slate-100">{t.brand.freeBannerText}</span>
       </div>
 
       {/* Main Sticky Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-[#24385c] dark:bg-[#122443]/95">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6">
           {/* Brand */}
           <Link
             to="/"
-            className="flex shrink-0 items-center gap-2.5 whitespace-nowrap font-display text-lg font-extrabold tracking-tight text-[#102544] dark:text-white"
+            className="flex min-w-0 shrink items-center gap-1.5 whitespace-nowrap font-display text-[13px] font-extrabold tracking-tight text-[#102544] sm:shrink-0 sm:gap-2.5 sm:text-lg dark:text-white"
           >
             <img
               src={LOGO_URL}
               alt={t.brand.logoAlt}
-              className="h-10 w-10 rounded-full object-cover"
+              className="h-8 w-8 shrink-0 rounded-full object-cover sm:h-10 sm:w-10"
               referrerPolicy="no-referrer"
             />
-            <span>{t.brand.name}</span>
+            <span className="truncate">{t.brand.name}</span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -173,23 +173,23 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </nav>
 
           {/* Header Tools */}
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <button
               type="button"
               onClick={() => setSearchOpen((v) => !v)}
               aria-label={t.common.search}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200 dark:hover:bg-[#1b3a6b]"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 sm:h-9 sm:w-9 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200 dark:hover:bg-[#1b3a6b]"
             >
               <Search className="h-4 w-4" />
             </button>
 
             <div className="relative flex items-center">
-              <Globe className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-500 dark:text-[#9fb0c8]" />
+              <Globe className="pointer-events-none absolute left-2.5 hidden h-3.5 w-3.5 text-slate-500 sm:block dark:text-[#9fb0c8]" />
               <select
                 aria-label={t.nav.languageLabel}
                 value={state.language}
                 onChange={(e) => setLanguage(e.target.value as LanguageCode)}
-                className="h-9 cursor-pointer rounded-lg border border-slate-200 bg-white pl-8 pr-2.5 text-xs sm:text-sm font-medium text-slate-800 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
+                className="h-8 max-w-[74px] cursor-pointer rounded-lg border border-slate-200 bg-white px-1.5 text-xs font-medium text-slate-800 sm:h-9 sm:max-w-none sm:pl-8 sm:pr-2.5 sm:text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
               >
                 {LANGUAGE_OPTIONS.map((opt) => (
                   <option key={opt.code} value={opt.code}>
@@ -203,7 +203,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               type="button"
               onClick={toggleTheme}
               aria-label={t.nav.toggleTheme}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#facc15] dark:hover:bg-[#1b3a6b]"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 sm:h-9 sm:w-9 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#facc15] dark:hover:bg-[#1b3a6b]"
             >
               {state.theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
@@ -211,7 +211,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <Link
               to="/notifications"
               aria-label={t.nav.notifications}
-              className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200 dark:hover:bg-[#1b3a6b]"
+              className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50 sm:h-9 sm:w-9 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200 dark:hover:bg-[#1b3a6b]"
             >
               <Bell className="h-4 w-4" />
               {unreadNotificationsCount > 0 && (
@@ -223,7 +223,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
             <Link
               to="/account"
-              className="hidden sm:inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544] dark:hover:brightness-95"
+              className="hidden h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#1b3a6b] sm:inline-flex dark:bg-[#facc15] dark:text-[#102544] dark:hover:brightness-95"
             >
               {firebaseUser ? state.profile.name : t.nav.login}
             </Link>
@@ -232,7 +232,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label={t.nav.menu}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 lg:hidden dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 sm:h-9 sm:w-9 lg:hidden dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -406,7 +406,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       {toastMessage && (
         <div
           role="status"
-          className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-[#facc15] bg-[#102544] px-5 py-2.5 text-sm font-medium text-white shadow-lg"
+          className="fixed bottom-5 left-1/2 z-50 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-[#facc15] bg-[#102544] px-4 py-2.5 text-center text-sm font-medium text-white shadow-lg"
         >
           {toastMessage}
         </div>
