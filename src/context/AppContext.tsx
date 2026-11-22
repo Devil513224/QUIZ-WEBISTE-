@@ -20,6 +20,8 @@ import {
 } from 'firebase/firestore';
 import { TRANSLATIONS, type LanguageCode, type TranslationSchema } from '../i18n';
 import {
+  DEFAULT_PDF_BRANDING,
+  DEFAULT_SITE_COMMUNITY,
   INITIAL_AFFAIRS,
   INITIAL_BANNERS,
   INITIAL_COURSES,
@@ -36,7 +38,9 @@ import {
   type HomepageSectionItem,
   type JobUpdateItem,
   type NotificationItem,
+  type PdfBrandingConfig,
   type QuestionItem,
+  type SiteCommunityConfig,
   type StudyMaterialItem,
   type TestDefinition,
   type TypingPassageItem,
@@ -123,6 +127,8 @@ export interface PersistedState {
   jobs: JobUpdateItem[];
   notificationsList: NotificationItem[];
   typingPassages: TypingPassageItem[];
+  pdfBranding: PdfBrandingConfig;
+  communityConfig: SiteCommunityConfig;
   adminTables: Record<string, GenericRow[]>;
 }
 
@@ -214,6 +220,8 @@ const getInitialState = (): PersistedState => {
       published: true,
     })),
     typingPassages: INITIAL_TYPING_PASSAGES,
+    pdfBranding: DEFAULT_PDF_BRANDING,
+    communityConfig: DEFAULT_SITE_COMMUNITY,
     adminTables: DEFAULT_ADMIN_TABLES,
   };
 
@@ -227,6 +235,8 @@ const getInitialState = (): PersistedState => {
         planner: { ...base.planner, ...(parsed.planner || {}) },
         notifications: { ...base.notifications, ...(parsed.notifications || {}) },
         profile: { ...base.profile, ...(parsed.profile || {}) },
+        pdfBranding: { ...base.pdfBranding, ...(parsed.pdfBranding || {}) },
+        communityConfig: { ...base.communityConfig, ...(parsed.communityConfig || {}) },
         adminTables: { ...base.adminTables, ...(parsed.adminTables || {}) },
       };
     }
@@ -262,6 +272,7 @@ interface AppContextValue {
   updateProfile: (profile: UserProfile) => Promise<void>;
   // Firestore Admin CRUD actions
   saveQuestionDoc: (item: QuestionItem) => Promise<void>;
+  saveQuestionsBatchDoc: (items: QuestionItem[]) => Promise<string[]>;
   deleteQuestionDoc: (id: string) => Promise<void>;
   saveTestDoc: (item: TestDefinition) => Promise<void>;
   deleteTestDoc: (id: string) => Promise<void>;
@@ -288,6 +299,8 @@ interface AppContextValue {
   deleteCatalogRowDoc: (id: string) => Promise<void>;
   saveReportDoc: (row: GenericRow) => Promise<void>;
   deleteReportDoc: (id: string) => Promise<void>;
+  savePdfBrandingDoc: (config: PdfBrandingConfig) => Promise<void>;
+  saveCommunityConfigDoc: (config: SiteCommunityConfig) => Promise<void>;
   toggleStudentStatusDoc: (uid: string, nextStatus: 'Active' | 'Suspended') => Promise<void>;
   seedFirestoreCatalog: (silent?: boolean) => Promise<void>;
   resetDemoState: () => void;
@@ -387,6 +400,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           type: tst.type,
           name: tst.name,
           subjectKeys: tst.subjectKeys,
+          examIds: tst.examIds || [],
           questionIds: tst.questionIds || [],
           minutes: tst.minutes,
           negativeMarking: tst.negativeMarking,
@@ -394,6 +408,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           published: tst.published ?? true,
           updatedAt: serverTimestamp(),
         });
+      });
+
+      batch.set(doc(db, 'siteBranding', 'pdf'), {
+        id: 'pdf',
+        brandName: DEFAULT_PDF_BRANDING.brandName,
+        tagline: DEFAULT_PDF_BRANDING.tagline,
+        footerNote: DEFAULT_PDF_BRANDING.footerNote,
+        logoUrl: DEFAULT_PDF_BRANDING.logoUrl || '',
+        accentColor: DEFAULT_PDF_BRANDING.accentColor,
+        watermarkMode: DEFAULT_PDF_BRANDING.watermarkMode || 'both',
+        watermarkText: DEFAULT_PDF_BRANDING.watermarkText || DEFAULT_PDF_BRANDING.brandName,
+        watermarkColor: DEFAULT_PDF_BRANDING.watermarkColor || DEFAULT_PDF_BRANDING.accentColor,
+        watermarkOpacity: DEFAULT_PDF_BRANDING.watermarkOpacity ?? 0.08,
+        published: true,
+        updatedAt: serverTimestamp(),
       });
 
       INITIAL_MATERIALS.forEach((mat) => {
@@ -531,6 +560,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           published: rp.pub,
           updatedAt: serverTimestamp(),
         });
+      });
+
+      batch.set(doc(db, 'siteCommunity', 'main'), {
+        id: 'main',
+        youtubeUrl: DEFAULT_SITE_COMMUNITY.youtubeUrl,
+        telegramUrl: DEFAULT_SITE_COMMUNITY.telegramUrl,
+        instagramUrl: DEFAULT_SITE_COMMUNITY.instagramUrl,
+        whatsappUrl: DEFAULT_SITE_COMMUNITY.whatsappUrl,
+        facebookUrl: DEFAULT_SITE_COMMUNITY.facebookUrl,
+        twitterUrl: DEFAULT_SITE_COMMUNITY.twitterUrl,
+        popupEnabled: DEFAULT_SITE_COMMUNITY.popupEnabled,
+        popupTitle: DEFAULT_SITE_COMMUNITY.popupTitle,
+        popupSubtitle: DEFAULT_SITE_COMMUNITY.popupSubtitle,
+        popupHighlight: DEFAULT_SITE_COMMUNITY.popupHighlight,
+        published: true,
+        updatedAt: serverTimestamp(),
       });
 
       try {
@@ -679,10 +724,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('tests'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as TestDefinition);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as TestDefinition;
+            return {
+              ...data,
+              examIds: Array.isArray(data.examIds) ? data.examIds : [],
+              questionIds: Array.isArray(data.questionIds) ? data.questionIds : [],
+            };
+          });
           setState((prev) => ({ ...prev, tests: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'tests')
+      )
+    );
+
+    // Site Branding (PDF Name & Logo)
+    unsubs.push(
+      onSnapshot(
+        makePublicOrAdminQuery('siteBranding'),
+        (snap) => {
+          if (snap.empty) return;
+          const pdfDoc = snap.docs.find((d) => d.id === 'pdf') || snap.docs[0];
+          if (!pdfDoc) return;
+          const data = pdfDoc.data();
+          const rawMode = String(data.watermarkMode || DEFAULT_PDF_BRANDING.watermarkMode || 'both');
+          const watermarkMode: PdfBrandingConfig['watermarkMode'] =
+            rawMode === 'logo' || rawMode === 'text' || rawMode === 'none' ? rawMode : 'both';
+          const rawOpacity = Number(data.watermarkOpacity);
+          setState((prev) => ({
+            ...prev,
+            pdfBranding: {
+              id: pdfDoc.id,
+              brandName: String(data.brandName || DEFAULT_PDF_BRANDING.brandName),
+              tagline: String(data.tagline ?? DEFAULT_PDF_BRANDING.tagline),
+              footerNote: String(data.footerNote ?? DEFAULT_PDF_BRANDING.footerNote),
+              logoUrl: data.logoUrl ? String(data.logoUrl) : undefined,
+              logoDataUrl: data.logoDataUrl ? String(data.logoDataUrl) : undefined,
+              accentColor: String(data.accentColor || DEFAULT_PDF_BRANDING.accentColor),
+              watermarkMode,
+              watermarkText: String(
+                data.watermarkText ?? data.brandName ?? DEFAULT_PDF_BRANDING.watermarkText ?? ''
+              ),
+              watermarkColor: String(
+                data.watermarkColor || data.accentColor || DEFAULT_PDF_BRANDING.watermarkColor
+              ),
+              watermarkOpacity: Number.isFinite(rawOpacity)
+                ? Math.max(0, Math.min(0.4, rawOpacity))
+                : (DEFAULT_PDF_BRANDING.watermarkOpacity ?? 0.08),
+              watermarkLogoUrl: data.watermarkLogoUrl ? String(data.watermarkLogoUrl) : '',
+              watermarkLogoDataUrl: data.watermarkLogoDataUrl
+                ? String(data.watermarkLogoDataUrl)
+                : '',
+            },
+          }));
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'siteBranding')
+      )
+    );
+
+    // Site Community (Social Media Channel Links & Visit Welcome Popup)
+    unsubs.push(
+      onSnapshot(
+        makePublicOrAdminQuery('siteCommunity'),
+        (snap) => {
+          if (snap.empty) return;
+          const commDoc = snap.docs.find((d) => d.id === 'main') || snap.docs[0];
+          if (!commDoc) return;
+          const data = commDoc.data();
+          setState((prev) => ({
+            ...prev,
+            communityConfig: {
+              id: commDoc.id,
+              youtubeUrl: String(data.youtubeUrl ?? ''),
+              telegramUrl: String(data.telegramUrl ?? ''),
+              instagramUrl: String(data.instagramUrl ?? ''),
+              whatsappUrl: String(data.whatsappUrl ?? ''),
+              facebookUrl: String(data.facebookUrl ?? ''),
+              twitterUrl: String(data.twitterUrl ?? ''),
+              popupEnabled: data.popupEnabled !== false,
+              popupTitle: String(data.popupTitle || DEFAULT_SITE_COMMUNITY.popupTitle),
+              popupSubtitle: String(data.popupSubtitle ?? DEFAULT_SITE_COMMUNITY.popupSubtitle),
+              popupHighlight: String(data.popupHighlight ?? DEFAULT_SITE_COMMUNITY.popupHighlight),
+            },
+          }));
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'siteCommunity')
       )
     );
 
@@ -1172,6 +1298,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const saveQuestionsBatchDoc = async (items: QuestionItem[]): Promise<string[]> => {
+    if (!items.length) return [];
+    const savedIds: string[] = [];
+    const CHUNK = 400;
+    try {
+      for (let i = 0; i < items.length; i += CHUNK) {
+        const chunk = items.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        chunk.forEach((item, idx) => {
+          const id = cleanId(item.id || `q_${Date.now()}_${i + idx}`, 'q');
+          savedIds.push(id);
+          batch.set(doc(db, 'questions', id), {
+            id,
+            subjectKey: item.subjectKey.slice(0, 32),
+            subjectName: item.subjectName.slice(0, 80),
+            question: item.question.slice(0, 1000),
+            options: item.options.slice(0, 6),
+            correctIndex: Math.max(0, Math.min(item.options.length - 1, item.correctIndex)),
+            explanation: item.explanation.slice(0, 1200),
+            published: Boolean(item.published),
+            updatedAt: serverTimestamp(),
+          });
+        });
+        await batch.commit();
+      }
+      await logAdminActivity(`Bulk imported ${savedIds.length} MCQ question(s)`);
+      return savedIds;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'questions');
+    }
+  };
+
   const deleteQuestionDoc = async (id: string) => {
     const path = `questions/${id}`;
     try {
@@ -1191,6 +1349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: item.type,
         name: item.name.slice(0, 160),
         subjectKeys: item.subjectKeys.length ? item.subjectKeys.slice(0, 10) : ['gk'],
+        examIds: (item.examIds || []).slice(0, 20),
         questionIds: (item.questionIds || []).slice(0, 200),
         minutes: Math.max(1, Math.min(360, Number(item.minutes) || 5)),
         negativeMarking: Math.max(0, Math.min(5, Number(item.negativeMarking) || 0)),
@@ -1200,6 +1359,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (item.note) payload.note = item.note.slice(0, 400);
       await setDoc(doc(db, 'tests', id), payload);
       await logAdminActivity(`Saved ${item.type}: ${item.name}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const savePdfBrandingDoc = async (config: PdfBrandingConfig) => {
+    const path = 'siteBranding/pdf';
+    try {
+      const wmMode =
+        config.watermarkMode === 'logo' ||
+        config.watermarkMode === 'text' ||
+        config.watermarkMode === 'none'
+          ? config.watermarkMode
+          : 'both';
+      const wmOpacity =
+        typeof config.watermarkOpacity === 'number' && Number.isFinite(config.watermarkOpacity)
+          ? Math.max(0, Math.min(0.4, Number(config.watermarkOpacity.toFixed(2))))
+          : 0.08;
+
+      const payload: Record<string, unknown> = {
+        id: 'pdf',
+        brandName: (config.brandName || 'LEARN WITH TG').trim().slice(0, 120),
+        tagline: (config.tagline || '').trim().slice(0, 200),
+        footerNote: (config.footerNote || '').trim().slice(0, 240),
+        accentColor: (config.accentColor || '#102544').slice(0, 32),
+        watermarkMode: wmMode,
+        watermarkOpacity: wmOpacity,
+        published: true,
+        updatedAt: serverTimestamp(),
+      };
+      if (config.logoUrl?.trim()) payload.logoUrl = config.logoUrl.trim().slice(0, 2048);
+      if (config.logoDataUrl?.trim()) payload.logoDataUrl = config.logoDataUrl.trim().slice(0, 350000);
+      if (config.watermarkText?.trim()) {
+        payload.watermarkText = config.watermarkText.trim().slice(0, 120);
+      }
+      if (config.watermarkColor?.trim()) {
+        payload.watermarkColor = config.watermarkColor.trim().slice(0, 32);
+      }
+      if (config.watermarkLogoUrl?.trim()) {
+        payload.watermarkLogoUrl = config.watermarkLogoUrl.trim().slice(0, 2048);
+      }
+      if (config.watermarkLogoDataUrl?.trim()) {
+        payload.watermarkLogoDataUrl = config.watermarkLogoDataUrl.trim().slice(0, 350000);
+      }
+      await setDoc(doc(db, 'siteBranding', 'pdf'), payload);
+      await logAdminActivity(`Updated PDF branding: ${String(payload.brandName)}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const saveCommunityConfigDoc = async (config: SiteCommunityConfig) => {
+    const path = 'siteCommunity/main';
+    try {
+      await setDoc(doc(db, 'siteCommunity', 'main'), {
+        id: 'main',
+        youtubeUrl: (config.youtubeUrl || '').trim().slice(0, 512),
+        telegramUrl: (config.telegramUrl || '').trim().slice(0, 512),
+        instagramUrl: (config.instagramUrl || '').trim().slice(0, 512),
+        whatsappUrl: (config.whatsappUrl || '').trim().slice(0, 512),
+        facebookUrl: (config.facebookUrl || '').trim().slice(0, 512),
+        twitterUrl: (config.twitterUrl || '').trim().slice(0, 512),
+        popupEnabled: Boolean(config.popupEnabled),
+        popupTitle: (config.popupTitle || DEFAULT_SITE_COMMUNITY.popupTitle).trim().slice(0, 160),
+        popupSubtitle: (config.popupSubtitle || '').trim().slice(0, 300),
+        popupHighlight: (config.popupHighlight || '').trim().slice(0, 600),
+        published: true,
+        updatedAt: serverTimestamp(),
+      });
+      await logAdminActivity('Updated Social Media links & Welcome Notification popup');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1585,6 +1814,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unreadNotificationsCount,
         updateProfile,
         saveQuestionDoc,
+        saveQuestionsBatchDoc,
         deleteQuestionDoc,
         saveTestDoc,
         deleteTestDoc,
@@ -1608,6 +1838,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteCatalogRowDoc,
         saveReportDoc,
         deleteReportDoc,
+        savePdfBrandingDoc,
+        saveCommunityConfigDoc,
         toggleStudentStatusDoc,
         seedFirestoreCatalog,
         resetDemoState,

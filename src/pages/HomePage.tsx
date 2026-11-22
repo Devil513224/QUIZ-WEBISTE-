@@ -50,33 +50,113 @@ export const HomePage: React.FC = () => {
     return state.language === 'en' ? found.heading : fallback;
   };
 
+  const isLightHexColor = (hex: string) => {
+    const clean = (hex || '').replace('#', '').trim();
+    if (!/^[0-9a-fA-F]{6}$/.test(clean) && !/^[0-9a-fA-F]{3}$/.test(clean)) return false;
+    const full =
+      clean.length === 3
+        ? clean
+            .split('')
+            .map((c) => c + c)
+            .join('')
+        : clean;
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.62;
+  };
+
+  const heroBanner = state.banners.find((b) => b.id === 'b1') || state.banners[0];
+  const heroBg =
+    heroBanner?.bgColor && /^#[0-9a-fA-F]{3,8}$/.test(heroBanner.bgColor)
+      ? heroBanner.bgColor
+      : '#102544';
+  const heroIsLight = isLightHexColor(heroBg);
+  const heroTitleText =
+    heroBanner &&
+    (state.language === 'en' ||
+      heroBanner.title !== 'Your Complete Destination for Exam Preparation')
+      ? heroBanner.title
+      : t.home.heroTitle;
+  const heroSubtitleText =
+    heroBanner &&
+    (state.language === 'en' ||
+      heroBanner.subtitle !== 'Free mock tests and quizzes for SSC, Railway & WB exams')
+      ? heroBanner.subtitle
+      : t.home.heroSubtitle;
+  const heroButtonText =
+    heroBanner && (state.language === 'en' || heroBanner.buttonText !== 'Start Learning')
+      ? heroBanner.buttonText
+      : t.home.startLearning;
+  const heroAlignClass =
+    heroBanner?.align === 'center'
+      ? 'text-center'
+      : heroBanner?.align === 'right'
+        ? 'text-right'
+        : 'text-left';
+  const extraVisibleBanners = state.banners.filter(
+    (b) => b.visible && b.id !== heroBanner?.id
+  );
+
   return (
     <div>
       {/* Hero Section */}
-      {isSectionVisible('hero') && (
-        <section className="bg-[#102544] py-14 text-white sm:py-16">
+      {isSectionVisible('hero') && (!heroBanner || heroBanner.visible !== false) && (
+        <section
+          className={`py-14 transition-colors sm:py-16 ${
+            heroIsLight ? 'text-[#0f172a]' : 'text-white'
+          }`}
+          style={{ backgroundColor: heroBg }}
+        >
           <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-4 sm:px-6 lg:grid-cols-12">
-            <div className="lg:col-span-7">
+            <div className={`lg:col-span-7 ${heroAlignClass}`}>
               <h1
-                className="font-display text-3xl font-extrabold leading-tight tracking-tight text-white sm:text-5xl"
+                className={`font-display text-3xl font-extrabold leading-tight tracking-tight sm:text-5xl ${
+                  heroIsLight ? 'text-[#0f172a]' : 'text-white'
+                }`}
                 style={{ textWrap: 'balance' }}
               >
-                {t.home.heroTitle}
+                {heroTitleText}
               </h1>
-              <p className="mt-4 max-w-xl text-base leading-relaxed text-[#c7d3e6] sm:text-lg">
-                {t.home.heroSubtitle}
+              <p
+                className={`mt-4 max-w-xl text-base leading-relaxed sm:text-lg ${
+                  heroBanner?.align === 'center'
+                    ? 'mx-auto'
+                    : heroBanner?.align === 'right'
+                      ? 'ml-auto'
+                      : ''
+                } ${heroIsLight ? 'text-slate-800' : 'text-[#c7d3e6]'}`}
+              >
+                {heroSubtitleText}
               </p>
 
-              <div className="mt-7 flex flex-wrap gap-3">
+              <div
+                className={`mt-7 flex flex-wrap gap-3 ${
+                  heroBanner?.align === 'center'
+                    ? 'justify-center'
+                    : heroBanner?.align === 'right'
+                      ? 'justify-end'
+                      : 'justify-start'
+                }`}
+              >
                 <Link
                   to="/tests"
-                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl bg-[#facc15] px-6 text-sm font-bold text-[#102544] transition-transform hover:brightness-95 active:scale-[0.99]"
+                  className={`inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl px-6 text-sm font-bold transition-transform hover:brightness-95 active:scale-[0.99] ${
+                    heroIsLight
+                      ? 'bg-[#102544] text-white'
+                      : 'bg-[#facc15] text-[#102544]'
+                  }`}
                 >
-                  {t.home.startLearning}
+                  {heroButtonText}
                 </Link>
                 <Link
                   to="/tests?type=Mock+Test"
-                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border-2 border-white/80 px-6 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                  className={`inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border-2 px-6 text-sm font-semibold transition-colors ${
+                    heroIsLight
+                      ? 'border-[#102544] text-[#102544] hover:bg-[#102544]/10'
+                      : 'border-white/80 text-white hover:bg-white/10'
+                  }`}
                 >
                   {t.home.exploreMocks}
                 </Link>
@@ -88,7 +168,13 @@ export const HomePage: React.FC = () => {
                   setExamFilter('All');
                   document.getElementById('exam-categories')?.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="mt-7 flex max-w-md overflow-hidden rounded-xl bg-white shadow-sm"
+                className={`mt-7 flex max-w-md overflow-hidden rounded-xl bg-white shadow-sm ${
+                  heroBanner?.align === 'center'
+                    ? 'mx-auto'
+                    : heroBanner?.align === 'right'
+                      ? 'ml-auto'
+                      : ''
+                }`}
                 role="search"
               >
                 <input
@@ -101,7 +187,11 @@ export const HomePage: React.FC = () => {
                 />
                 <button
                   type="submit"
-                  className="inline-flex shrink-0 items-center gap-1.5 bg-[#facc15] px-5 text-sm font-bold text-[#102544] hover:brightness-95"
+                  className={`inline-flex shrink-0 items-center gap-1.5 px-5 text-sm font-bold hover:brightness-95 ${
+                    heroIsLight
+                      ? 'bg-[#102544] text-white'
+                      : 'bg-[#facc15] text-[#102544]'
+                  }`}
                 >
                   <Search className="h-4 w-4" />
                   <span>{t.home.searchExamBtn}</span>
@@ -184,6 +274,58 @@ export const HomePage: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Additional Admin Promotional Banners */}
+      {extraVisibleBanners.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6">
+          <div className="grid grid-cols-1 gap-4">
+            {extraVisibleBanners.map((b) => {
+              const bg = /^#[0-9a-fA-F]{3,8}$/.test(b.bgColor || '') ? b.bgColor : '#1b3a6b';
+              const light = isLightHexColor(bg);
+              const alignCls =
+                b.align === 'center'
+                  ? 'text-center items-center'
+                  : b.align === 'right'
+                    ? 'text-right items-end'
+                    : 'text-left items-start';
+              return (
+                <div
+                  key={b.id}
+                  className={`flex flex-col justify-between gap-4 rounded-2xl p-6 shadow-sm sm:flex-row sm:items-center ${
+                    light ? 'text-[#0f172a]' : 'text-white'
+                  }`}
+                  style={{ backgroundColor: bg }}
+                >
+                  <div className={`flex flex-1 flex-col ${alignCls}`}>
+                    <h2 className="font-display text-lg font-extrabold sm:text-xl">{b.title}</h2>
+                    {b.subtitle && (
+                      <p
+                        className={`mt-1 text-xs sm:text-sm ${
+                          light ? 'text-slate-800' : 'text-slate-200'
+                        }`}
+                      >
+                        {b.subtitle}
+                      </p>
+                    )}
+                  </div>
+                  {b.buttonText && (
+                    <Link
+                      to="/tests?type=Daily+Quiz"
+                      className={`inline-flex shrink-0 items-center justify-center rounded-xl px-5 py-2.5 text-xs font-bold transition-transform hover:brightness-95 sm:text-sm ${
+                        light
+                          ? 'bg-[#102544] text-white'
+                          : 'bg-[#facc15] text-[#102544]'
+                      }`}
+                    >
+                      {b.buttonText}
+                    </Link>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

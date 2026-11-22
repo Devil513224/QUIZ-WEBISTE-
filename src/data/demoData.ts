@@ -32,6 +32,7 @@ export interface TestDefinition {
   type: 'Daily Quiz' | 'Mock Test' | 'Sectional Test' | 'Previous-Year Paper' | 'Custom Practice';
   name: string;
   subjectKeys: Array<'gk' | 'cs'>;
+  examIds?: string[];
   questionIds?: string[];
   minutes: number;
   negativeMarking: number;
@@ -39,6 +40,36 @@ export interface TestDefinition {
   questionLimit?: number;
   shuffle?: boolean;
   published?: boolean;
+}
+
+export interface PdfBrandingConfig {
+  id: string;
+  brandName: string;
+  tagline: string;
+  footerNote: string;
+  logoUrl?: string;
+  logoDataUrl?: string;
+  accentColor: string;
+  watermarkMode?: 'both' | 'logo' | 'text' | 'none';
+  watermarkText?: string;
+  watermarkColor?: string;
+  watermarkOpacity?: number;
+  watermarkLogoUrl?: string;
+  watermarkLogoDataUrl?: string;
+}
+
+export interface SiteCommunityConfig {
+  id: string;
+  youtubeUrl: string;
+  telegramUrl: string;
+  instagramUrl: string;
+  whatsappUrl: string;
+  facebookUrl: string;
+  twitterUrl: string;
+  popupEnabled: boolean;
+  popupTitle: string;
+  popupSubtitle: string;
+  popupHighlight: string;
 }
 
 export interface StudyMaterialItem {
@@ -125,6 +156,36 @@ export interface TypingPassageItem {
 }
 
 export const LOGO_URL = '/assets/aistudio/Learn_With_TG__Smart_Growth_Badge__1__04e13a98.png';
+
+export const DEFAULT_PDF_BRANDING: PdfBrandingConfig = {
+  id: 'pdf',
+  brandName: 'LEARN WITH TG',
+  tagline: 'Learn Smart, Grow Every Day.',
+  footerNote: '100% Free Exam Preparation · Learn With TG',
+  logoUrl: LOGO_URL,
+  accentColor: '#102544',
+  watermarkMode: 'both',
+  watermarkText: 'LEARN WITH TG',
+  watermarkColor: '#102544',
+  watermarkOpacity: 0.08,
+  watermarkLogoUrl: '',
+  watermarkLogoDataUrl: '',
+};
+
+export const DEFAULT_SITE_COMMUNITY: SiteCommunityConfig = {
+  id: 'main',
+  youtubeUrl: 'https://www.youtube.com/@learnwithtg',
+  telegramUrl: 'https://t.me/learnwithtg',
+  instagramUrl: 'https://www.instagram.com/learnwithtg',
+  whatsappUrl: 'https://whatsapp.com/channel/learnwithtg',
+  facebookUrl: 'https://www.facebook.com/learnwithtg',
+  twitterUrl: '',
+  popupEnabled: true,
+  popupTitle: 'Welcome to LEARN WITH TG!',
+  popupSubtitle: 'Join our official channels for daily PDFs, free classes, quiz alerts & job updates.',
+  popupHighlight:
+    'New quizzes, mock tests & free study material PDFs are added daily. Join Telegram & WhatsApp so you never miss an update!',
+};
 
 export const SUBJECT_SYLLABI: Record<string, SubjectSyllabus> = {
   gk: {
@@ -409,6 +470,7 @@ export const INITIAL_TESTS: TestDefinition[] = [
     type: 'Daily Quiz',
     name: 'Daily GK Quiz',
     subjectKeys: ['gk'],
+    examIds: ['ssc', 'wb', 'railway'],
     minutes: 5,
     negativeMarking: 0,
     published: true,
@@ -418,6 +480,7 @@ export const INITIAL_TESTS: TestDefinition[] = [
     type: 'Mock Test',
     name: 'Free Mock Test 1: GK & Computer',
     subjectKeys: ['gk', 'cs'],
+    examIds: ['ssc', 'railway', 'wb', 'computer'],
     minutes: 10,
     negativeMarking: 0.25,
     published: true,
@@ -427,6 +490,7 @@ export const INITIAL_TESTS: TestDefinition[] = [
     type: 'Sectional Test',
     name: 'General Knowledge Sectional',
     subjectKeys: ['gk'],
+    examIds: ['upsc', 'state-psc', 'wb'],
     minutes: 5,
     negativeMarking: 0.25,
     published: true,
@@ -436,6 +500,7 @@ export const INITIAL_TESTS: TestDefinition[] = [
     type: 'Sectional Test',
     name: 'Computer Knowledge Sectional',
     subjectKeys: ['cs'],
+    examIds: ['computer', 'banking', 'ssc'],
     minutes: 5,
     negativeMarking: 0.25,
     published: true,
@@ -445,6 +510,7 @@ export const INITIAL_TESTS: TestDefinition[] = [
     type: 'Previous-Year Paper',
     name: 'Sample Paper in Previous-Year Format',
     subjectKeys: ['gk', 'cs'],
+    examIds: ['ssc', 'wb', 'police'],
     minutes: 10,
     negativeMarking: 0.25,
     note: 'Sample paper in previous-year format (Demo only).',

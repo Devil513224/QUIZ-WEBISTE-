@@ -13,6 +13,11 @@ import {
 import { useApp } from '../context/AppContext';
 import { EXAM_CATEGORIES, LOGO_URL } from '../data/demoData';
 import { LANGUAGE_OPTIONS, type LanguageCode } from '../i18n';
+import {
+  FooterSocialLinks,
+  SESSION_POPUP_KEY,
+  WelcomeNotificationPopup,
+} from './SocialCommunity';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
@@ -29,6 +34,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickQuery, setQuickQuery] = useState('');
+  const [welcomePopupOpen, setWelcomePopupOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -39,6 +45,28 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setMoreOpen(false);
     setSearchOpen(false);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (isAdminRoute || !state.communityConfig.popupEnabled) return;
+    try {
+      if (sessionStorage.getItem(SESSION_POPUP_KEY) === '1') return;
+    } catch {
+      // Ignore storage access restrictions
+    }
+    const timer = window.setTimeout(() => {
+      setWelcomePopupOpen(true);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [isAdminRoute, state.communityConfig.popupEnabled]);
+
+  const dismissWelcomePopup = () => {
+    setWelcomePopupOpen(false);
+    try {
+      sessionStorage.setItem(SESSION_POPUP_KEY, '1');
+    } catch {
+      // Ignore storage access restrictions
+    }
+  };
 
   const primaryLinks = [
     { to: '/', label: t.nav.home },
@@ -361,6 +389,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 </div>
               </div>
               <p className="mt-4 text-sm leading-relaxed text-slate-300">{t.footer.aboutText}</p>
+              <FooterSocialLinks onOpenPopup={() => setWelcomePopupOpen(true)} />
             </div>
 
             <div>
@@ -402,6 +431,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
       </footer>
+
+      <WelcomeNotificationPopup open={welcomePopupOpen} onClose={dismissWelcomePopup} />
 
       {toastMessage && (
         <div

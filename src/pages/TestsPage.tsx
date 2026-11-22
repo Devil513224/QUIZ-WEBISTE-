@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Clock } from 'lucide-react';
+import { CheckCircle2, Clock, Download, FileText, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DemoLabel, EmptyState } from '../components/CommonUI';
-import { type QuestionItem, type TestDefinition } from '../data/demoData';
+import { EXAM_CATEGORIES, LOGO_URL, type QuestionItem, type TestDefinition } from '../data/demoData';
+import { exportQuizToPdf } from '../utils/quizPdfExport';
 
 type ViewMode = 'list' | 'instructions' | 'exam' | 'result' | 'review';
 
@@ -13,13 +14,16 @@ const SUBJECT_NAMES: Record<'gk' | 'cs', string> = {
 };
 
 export const TestsPage: React.FC = () => {
-  const { state, t, addTestAttempt } = useApp();
+  const { state, t, showToast, addTestAttempt } = useApp();
   const [searchParams] = useSearchParams();
 
   const typeParam = searchParams.get('type') || 'All';
+  const examParam = searchParams.get('exam') || 'All';
   const startParam = searchParams.get('start');
 
   const [typeFilter, setTypeFilter] = useState<string>(typeParam);
+  const [examFilter, setExamFilter] = useState<string>(examParam);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('list');
   const [activeTest, setActiveTest] = useState<TestDefinition | null>(null);
   const [examQuestions, setExamQuestions] = useState<QuestionItem[]>([]);
@@ -39,11 +43,16 @@ export const TestsPage: React.FC = () => {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [timeUsed, setTimeUsed] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showPostSubmitModal, setShowPostSubmitModal] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<'All' | 'Correct' | 'Incorrect' | 'Unanswered'>('All');
 
   useEffect(() => {
     setTypeFilter(typeParam);
   }, [typeParam]);
+
+  useEffect(() => {
+    setExamFilter(examParam);
+  }, [examParam]);
 
   const availableTests = useMemo(
     () => state.tests.filter((x) => x.published !== false),
@@ -82,6 +91,38 @@ export const TestsPage: React.FC = () => {
   const formatTime = (sec: number) =>
     `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
+  const handleDownloadTestPdf = async (
+    test: TestDefinition,
+    qsOverride?: QuestionItem[],
+    includeAnswers = true
+  ) => {
+    const qs = qsOverride && qsOverride.length > 0 ? qsOverride : getQuestionsForTest(test);
+    if (!qs.length) {
+      showToast('No published questions found for this test.');
+      return;
+    }
+    setPdfBusyId(test.id);
+    try {
+      await exportQuizToPdf({
+        testName: test.name,
+        testType: test.type,
+        minutes: test.minutes,
+        questions: qs,
+        branding: state.pdfBranding,
+        includeAnswers,
+      });
+      showToast(
+        includeAnswers
+          ? 'Quiz Q&A PDF downloaded!'
+          : 'Practice Question Paper PDF downloaded!'
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'PDF download failed.');
+    } finally {
+      setPdfBusyId(null);
+    }
+  };
+
   const beginExam = (test: TestDefinition) => {
     const qs = getQuestionsForTest(test);
     if (!qs.length) return;
@@ -94,6 +135,7 @@ export const TestsPage: React.FC = () => {
     setSecondsLeft(test.minutes * 60);
     setTimeUsed(0);
     setShowSubmitModal(false);
+    setShowPostSubmitModal(false);
     setView('exam');
   };
 
@@ -130,6 +172,7 @@ export const TestsPage: React.FC = () => {
       date: new Date().toISOString(),
     });
 
+    setShowPostSubmitModal(true);
     setView('result');
   };
 
@@ -204,6 +247,15 @@ export const TestsPage: React.FC = () => {
               className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:text-slate-200 dark:hover:bg-[#16294b]"
             >
               {t.common.back}
+            </button>
+            <button
+              type="button"
+              disabled={pdfBusyId === activeTest.id || qCount === 0}
+              onClick={() => void handleDownloadTestPdf(activeTest)}
+              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+            >
+              <Download className="h-4 w-4" />
+              <span>{pdfBusyId === activeTest.id ? 'Generating PDF…' : 'Download Q&A PDF'}</span>
             </button>
             <button
               type="button"
@@ -401,13 +453,28 @@ export const TestsPage: React.FC = () => {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowSubmitModal(true)}
-              className="mt-6 h-11 w-full rounded-xl bg-[#facc15] text-sm font-bold text-[#102544] hover:brightness-95"
-            >
-              {t.tests.submitTest}
-            </button>
+            <div className="mt-6 space-y-2.5">
+              <button
+                type="button"
+                onClick={() => setShowSubmitModal(true)}
+                className="h-11 w-full rounded-xl bg-[#facc15] text-sm font-bold text-[#102544] hover:brightness-95"
+              >
+                {t.tests.submitTest}
+              </button>
+              <button
+                type="button"
+                disabled={pdfBusyId === activeTest.id}
+                onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, false)}
+                className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>
+                  {pdfBusyId === activeTest.id
+                    ? 'Generating PDF…'
+                    : 'Download Question Paper PDF'}
+                </span>
+              </button>
+            </div>
           </aside>
         </div>
 
@@ -567,6 +634,176 @@ export const TestsPage: React.FC = () => {
             {t.tests.retakeTest}
           </button>
         </div>
+
+        {/* Dedicated Bottom Download PDF Card */}
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 dark:border-[#24385c] dark:bg-[#122443]">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div className="flex items-start gap-3">
+              <img
+                src={state.pdfBranding.logoDataUrl || state.pdfBranding.logoUrl || LOGO_URL}
+                alt={state.pdfBranding.brandName}
+                className="h-11 w-11 shrink-0 rounded-full border border-slate-200 bg-white object-cover"
+              />
+              <div>
+                <h2 className="font-display text-base font-extrabold text-slate-900 sm:text-lg dark:text-white">
+                  Download This Quiz as PDF ({state.pdfBranding.brandName})
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-600 sm:text-sm dark:text-[#9fb0c8]">
+                  Save all {examQuestions.length} questions with answers &amp; explanations or download a clean practice paper for offline revision.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2.5">
+              <button
+                type="button"
+                disabled={pdfBusyId === activeTest.id}
+                onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, true)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#102544] px-4 text-xs font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-50 sm:text-sm dark:bg-[#facc15] dark:text-[#102544]"
+              >
+                <Download className="h-4 w-4" />
+                <span>
+                  {pdfBusyId === activeTest.id ? 'Generating PDF…' : 'Download Q&A PDF (With Answers)'}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={pdfBusyId === activeTest.id}
+                onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, false)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Questions Only PDF</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Post-Submit Automatic PDF Download Popup */}
+        {showPostSubmitModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="post-submit-pdf-title"
+          >
+            <div
+              className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs"
+              onClick={() => setShowPostSubmitModal(false)}
+              aria-hidden="true"
+            />
+            <div className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-[#24385c] dark:bg-[#122443]">
+              <div className="relative bg-[#102544] px-5 py-4 text-white border-b-4 border-[#facc15]">
+                <button
+                  type="button"
+                  onClick={() => setShowPostSubmitModal(false)}
+                  aria-label="Close"
+                  className="absolute right-3.5 top-3.5 rounded-lg bg-white/10 p-1.5 text-white hover:bg-white/20"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <div className="flex items-center gap-2.5 pr-8">
+                  <CheckCircle2 className="h-6 w-6 shrink-0 text-[#facc15]" />
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-[#facc15]">
+                      Test Submitted Successfully
+                    </div>
+                    <h2 id="post-submit-pdf-title" className="font-display text-lg font-extrabold">
+                      {activeTest.name}
+                    </h2>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-center dark:border-[#24385c] dark:bg-[#16294b]">
+                  <div>
+                    <div className="font-mono-num text-base font-extrabold text-slate-900 dark:text-white">
+                      {score}/{examQuestions.length}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">{t.tests.score}</div>
+                  </div>
+                  <div>
+                    <div className="font-mono-num text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                      {correct}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">{t.tests.correct}</div>
+                  </div>
+                  <div>
+                    <div className="font-mono-num text-base font-extrabold text-[#102544] dark:text-[#facc15]">
+                      {accuracy}%
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">{t.tests.accuracy}</div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-[#eef2f8]/60 p-3.5 dark:border-[#24385c] dark:bg-[#0b1730]">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src={state.pdfBranding.logoDataUrl || state.pdfBranding.logoUrl || LOGO_URL}
+                      alt={state.pdfBranding.brandName}
+                      className="h-9 w-9 shrink-0 rounded-full border border-slate-200 bg-white object-cover"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-extrabold text-slate-900 dark:text-white">
+                        Download Q&amp;A PDF ({state.pdfBranding.brandName})
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-[#9fb0c8]">
+                        Get all questions, answers &amp; explanations in one PDF for revision.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      disabled={pdfBusyId === activeTest.id}
+                      onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, true)}
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#facc15] px-4 text-sm font-bold text-[#102544] hover:brightness-95 disabled:opacity-50"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>
+                        {pdfBusyId === activeTest.id
+                          ? 'Generating PDF…'
+                          : 'Download Q&A PDF (With Answers)'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pdfBusyId === activeTest.id}
+                      onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, false)}
+                      className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      <span>Download Questions Only PDF</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPostSubmitModal(false);
+                      setReviewFilter('All');
+                      setView('review');
+                    }}
+                    className="h-9 rounded-xl border border-slate-300 px-3.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:text-slate-200"
+                  >
+                    {t.tests.reviewAnswers}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPostSubmitModal(false)}
+                    className="h-9 rounded-xl bg-[#102544] px-4 text-xs font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                  >
+                    View Score Card
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -673,14 +910,61 @@ export const TestsPage: React.FC = () => {
             {t.tests.allTests}
           </button>
         </div>
+
+        {/* Dedicated Bottom Download PDF Card on Answer Review */}
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 dark:border-[#24385c] dark:bg-[#122443]">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div className="flex items-start gap-3">
+              <img
+                src={state.pdfBranding.logoDataUrl || state.pdfBranding.logoUrl || LOGO_URL}
+                alt={state.pdfBranding.brandName}
+                className="h-11 w-11 shrink-0 rounded-full border border-slate-200 bg-white object-cover"
+              />
+              <div>
+                <h2 className="font-display text-base font-extrabold text-slate-900 sm:text-lg dark:text-white">
+                  Save Answers &amp; Explanations as PDF ({state.pdfBranding.brandName})
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-600 sm:text-sm dark:text-[#9fb0c8]">
+                  Download this complete quiz with correct answers &amp; explanations or questions-only format.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2.5">
+              <button
+                type="button"
+                disabled={pdfBusyId === activeTest.id}
+                onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, true)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#102544] px-4 text-xs font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-50 sm:text-sm dark:bg-[#facc15] dark:text-[#102544]"
+              >
+                <Download className="h-4 w-4" />
+                <span>
+                  {pdfBusyId === activeTest.id ? 'Generating PDF…' : 'Download Q&A PDF (With Answers)'}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={pdfBusyId === activeTest.id}
+                onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, false)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+              >
+                <FileText className="h-4 w-4" />
+                <span>Questions Only PDF</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   // Default List View + Custom Practice Builder
-  const visibleTests = availableTests.filter(
-    (test) => typeFilter === 'All' || test.type === typeFilter
-  );
+  const visibleTests = availableTests.filter((test) => {
+    const matchesType = typeFilter === 'All' || test.type === typeFilter;
+    const matchesExam =
+      examFilter === 'All' || (test.examIds || []).includes(examFilter);
+    return matchesType && matchesExam;
+  });
 
   const handleCreateCustom = () => {
     const secs: Array<'gk' | 'cs'> = [];
@@ -713,62 +997,115 @@ export const TestsPage: React.FC = () => {
       </h1>
       <p className="mt-1 text-sm text-slate-600 dark:text-[#9fb0c8]">{t.tests.subtitle}</p>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {filterTypes.map((ft) => (
-          <button
-            key={ft.key}
-            type="button"
-            onClick={() => setTypeFilter(ft.key)}
-            className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              typeFilter === ft.key
-                ? 'bg-[#102544] text-white dark:bg-[#facc15] dark:text-[#102544]'
-                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-200'
-            }`}
-          >
-            {ft.label}
-          </button>
-        ))}
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {filterTypes.map((ft) => (
+            <button
+              key={ft.key}
+              type="button"
+              onClick={() => setTypeFilter(ft.key)}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                typeFilter === ft.key
+                  ? 'bg-[#102544] text-white dark:bg-[#facc15] dark:text-[#102544]'
+                  : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-200'
+              }`}
+            >
+              {ft.label}
+            </button>
+          ))}
+        </div>
+
+        <select
+          aria-label="Filter by exam"
+          value={examFilter}
+          onChange={(e) => setExamFilter(e.target.value)}
+          className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-100"
+        >
+          <option value="All">All Exam Categories</option>
+          {EXAM_CATEGORIES.map((ex) => (
+            <option key={ex.id} value={ex.id}>
+              {ex.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {visibleTests.map((test) => {
-          const count = getQuestionsForTest(test).length;
-          return (
-            <div
-              key={test.id}
-              className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]"
-            >
-              <div>
-                <DemoLabel text={`${test.type} · ${t.common.demo}`} />
-                <h2 className="mt-1.5 font-display text-xl font-bold text-slate-900 dark:text-white">
-                  {test.name}
-                </h2>
-                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
-                  <span><strong className="text-slate-900 dark:text-white">{count}</strong> {t.common.questionsCount}</span>
-                  <span>·</span>
-                  <span><strong className="text-slate-900 dark:text-white">{test.minutes}</strong> {t.common.minutes}</span>
-                  <span>·</span>
-                  <span>
-                    {test.negativeMarking > 0
-                      ? t.tests.negativeMark.replace('{neg}', String(test.negativeMarking))
-                      : t.tests.noNegative}
-                  </span>
+      {visibleTests.length === 0 ? (
+        <div className="mt-6">
+          <EmptyState
+            onReset={() => {
+              setTypeFilter('All');
+              setExamFilter('All');
+            }}
+          />
+        </div>
+      ) : (
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {visibleTests.map((test) => {
+            const count = getQuestionsForTest(test).length;
+            const examNames = (test.examIds || [])
+              .map((eid) => EXAM_CATEGORIES.find((e) => e.id === eid)?.name)
+              .filter(Boolean) as string[];
+            return (
+              <div
+                key={test.id}
+                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]"
+              >
+                <div>
+                  <DemoLabel text={`${test.type}`} />
+                  <h2 className="mt-1.5 font-display text-xl font-bold text-slate-900 dark:text-white">
+                    {test.name}
+                  </h2>
+                  {examNames.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {examNames.map((ename) => (
+                        <span
+                          key={ename}
+                          className="rounded-md bg-[#eef2f8] px-2 py-0.5 text-[11px] font-semibold text-[#102544] dark:bg-[#16294b] dark:text-[#facc15]"
+                        >
+                          {ename}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                    <span><strong className="text-slate-900 dark:text-white">{count}</strong> {t.common.questionsCount}</span>
+                    <span>·</span>
+                    <span><strong className="text-slate-900 dark:text-white">{test.minutes}</strong> {t.common.minutes}</span>
+                    <span>·</span>
+                    <span>
+                      {test.negativeMarking > 0
+                        ? t.tests.negativeMark.replace('{neg}', String(test.negativeMarking))
+                        : t.tests.noNegative}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-5 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTest(test);
+                      setView('instructions');
+                    }}
+                    className="inline-flex h-10 items-center justify-center rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                  >
+                    {t.tests.viewInstructions}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pdfBusyId === test.id || count === 0}
+                    onClick={() => void handleDownloadTestPdf(test)}
+                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>{pdfBusyId === test.id ? 'PDF…' : 'Q&A PDF'}</span>
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTest(test);
-                  setView('instructions');
-                }}
-                className="mt-5 inline-flex h-10 w-fit items-center justify-center rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
-              >
-                {t.tests.viewInstructions}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Custom Practice Test Builder */}
       <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 dark:border-[#24385c] dark:bg-[#122443]">

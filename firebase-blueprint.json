@@ -83,6 +83,7 @@
         "type": { "type": "string", "enum": ["Daily Quiz", "Mock Test", "Sectional Test", "Previous-Year Paper", "Custom Practice"] },
         "name": { "type": "string", "minLength": 2, "maxLength": 160 },
         "subjectKeys": { "type": "array" },
+        "examIds": { "type": "array" },
         "questionIds": { "type": "array" },
         "minutes": { "type": "number" },
         "negativeMarking": { "type": "number" },
@@ -265,6 +266,64 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "time", "who", "act", "published", "updatedAt"]
+    },
+    "SiteBranding": {
+      "title": "SiteBranding",
+      "description": "Admin-managed brand name, logo, tagline, and footer note used for exported quiz PDFs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "brandName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "footerNote": { "type": "string", "maxLength": 240 },
+        "logoUrl": { "type": "string", "maxLength": 2048 },
+        "logoDataUrl": { "type": "string", "maxLength": 350000 },
+        "accentColor": { "type": "string", "maxLength": 32 },
+        "watermarkMode": { "type": "string", "enum": ["both", "logo", "text", "none"] },
+        "watermarkText": { "type": "string", "maxLength": 120 },
+        "watermarkColor": { "type": "string", "maxLength": 32 },
+        "watermarkOpacity": { "type": "number" },
+        "watermarkLogoUrl": { "type": "string", "maxLength": 2048 },
+        "watermarkLogoDataUrl": { "type": "string", "maxLength": 350000 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "brandName", "tagline", "footerNote", "accentColor", "published", "updatedAt"]
+    },
+    "SiteCommunity": {
+      "title": "SiteCommunity",
+      "description": "Admin-managed social media channel URLs (YouTube, Telegram, Instagram, WhatsApp, Facebook, X) and visit welcome popup configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "youtubeUrl": { "type": "string", "maxLength": 512 },
+        "telegramUrl": { "type": "string", "maxLength": 512 },
+        "instagramUrl": { "type": "string", "maxLength": 512 },
+        "whatsappUrl": { "type": "string", "maxLength": 512 },
+        "facebookUrl": { "type": "string", "maxLength": 512 },
+        "twitterUrl": { "type": "string", "maxLength": 512 },
+        "popupEnabled": { "type": "boolean" },
+        "popupTitle": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "popupSubtitle": { "type": "string", "maxLength": 300 },
+        "popupHighlight": { "type": "string", "maxLength": 600 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "youtubeUrl",
+        "telegramUrl",
+        "instagramUrl",
+        "whatsappUrl",
+        "facebookUrl",
+        "twitterUrl",
+        "popupEnabled",
+        "popupTitle",
+        "popupSubtitle",
+        "popupHighlight",
+        "published",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -335,6 +394,14 @@
     "/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
       "description": "Admin-only audit logs."
+    },
+    "/siteBranding/{docId}": {
+      "schema": { "$ref": "#/entities/SiteBranding" },
+      "description": "PDF export brand name, logo, and footer settings."
+    },
+    "/siteCommunity/{docId}": {
+      "schema": { "$ref": "#/entities/SiteCommunity" },
+      "description": "Social media channel URLs and visit welcome popup configuration."
     }
   }
 }

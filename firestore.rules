@@ -120,11 +120,12 @@ service cloud.firestore {
 
     function isValidTest(data) {
       return data.keys().hasAll(['id', 'type', 'name', 'subjectKeys', 'minutes', 'negativeMarking', 'published', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt'])
         && isValidId(data.id)
         && (data.type == 'Daily Quiz' || data.type == 'Mock Test' || data.type == 'Sectional Test' || data.type == 'Previous-Year Paper' || data.type == 'Custom Practice')
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 160
         && data.subjectKeys is list && data.subjectKeys.size() >= 1 && data.subjectKeys.size() <= 10 && data.subjectKeys[0] is string
+        && (!('examIds' in data) || (data.examIds is list && data.examIds.size() <= 20))
         && (!('questionIds' in data) || (data.questionIds is list && data.questionIds.size() <= 200))
         && (data.minutes is int || data.minutes is float) && data.minutes >= 1 && data.minutes <= 360
         && (data.negativeMarking is int || data.negativeMarking is float) && data.negativeMarking >= 0 && data.negativeMarking <= 5
@@ -274,6 +275,56 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSiteBranding(data) {
+      return data.keys().hasAll(['id', 'brandName', 'tagline', 'footerNote', 'accentColor', 'published', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'brandName', 'tagline', 'footerNote', 'logoUrl', 'logoDataUrl',
+          'accentColor', 'watermarkMode', 'watermarkText', 'watermarkColor',
+          'watermarkOpacity', 'watermarkLogoUrl', 'watermarkLogoDataUrl', 'published', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 120
+        && data.tagline is string && data.tagline.size() <= 200
+        && data.footerNote is string && data.footerNote.size() <= 240
+        && isOptString(data, 'logoUrl', 2048)
+        && isOptString(data, 'logoDataUrl', 350000)
+        && data.accentColor is string && data.accentColor.size() <= 32
+        && (!('watermarkMode' in data) || (data.watermarkMode == 'both' || data.watermarkMode == 'logo' || data.watermarkMode == 'text' || data.watermarkMode == 'none'))
+        && isOptString(data, 'watermarkText', 120)
+        && isOptString(data, 'watermarkColor', 32)
+        && (!('watermarkOpacity' in data) || ((data.watermarkOpacity is int || data.watermarkOpacity is float) && data.watermarkOpacity >= 0 && data.watermarkOpacity <= 0.5))
+        && isOptString(data, 'watermarkLogoUrl', 2048)
+        && isOptString(data, 'watermarkLogoDataUrl', 350000)
+        && data.published is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSiteCommunity(data) {
+      return data.keys().hasAll([
+          'id', 'youtubeUrl', 'telegramUrl', 'instagramUrl', 'whatsappUrl',
+          'facebookUrl', 'twitterUrl', 'popupEnabled', 'popupTitle', 'popupSubtitle',
+          'popupHighlight', 'published', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'youtubeUrl', 'telegramUrl', 'instagramUrl', 'whatsappUrl',
+          'facebookUrl', 'twitterUrl', 'popupEnabled', 'popupTitle', 'popupSubtitle',
+          'popupHighlight', 'published', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.youtubeUrl is string && data.youtubeUrl.size() <= 512
+        && data.telegramUrl is string && data.telegramUrl.size() <= 512
+        && data.instagramUrl is string && data.instagramUrl.size() <= 512
+        && data.whatsappUrl is string && data.whatsappUrl.size() <= 512
+        && data.facebookUrl is string && data.facebookUrl.size() <= 512
+        && data.twitterUrl is string && data.twitterUrl.size() <= 512
+        && data.popupEnabled is bool
+        && data.popupTitle is string && data.popupTitle.size() >= 1 && data.popupTitle.size() <= 160
+        && data.popupSubtitle is string && data.popupSubtitle.size() <= 300
+        && data.popupHighlight is string && data.popupHighlight.size() <= 600
+        && data.published is bool
+        && data.updatedAt is timestamp;
+    }
+
     // Connection check document (get only)
     match /test/connection {
       allow get: if resource == null || resource.data.published == true || isAdmin() || isSignedIn();
@@ -364,7 +415,7 @@ service cloud.firestore {
       allow create: if isValidId(testId) && isAdmin() && isValidTest(incoming()) && incoming().updatedAt == request.time;
       allow update: if isValidId(testId) && isAdmin() && isValidTest(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt']);
       allow delete: if isValidId(testId) && isAdmin();
     }
 
@@ -477,6 +528,34 @@ service cloud.firestore {
         && incoming().id == existing().id && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['time', 'who', 'act', 'published', 'updatedAt']);
       allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    match /siteBranding/{docId} {
+      allow get: if isValidId(docId) && (existing().published == true || isAdmin());
+      allow list: if existing().published == true || isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidSiteBranding(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isAdmin() && isValidSiteBranding(incoming())
+        && incoming().id == existing().id && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'brandName', 'tagline', 'footerNote', 'logoUrl', 'logoDataUrl', 'accentColor',
+          'watermarkMode', 'watermarkText', 'watermarkColor', 'watermarkOpacity',
+          'watermarkLogoUrl', 'watermarkLogoDataUrl', 'published', 'updatedAt'
+        ]);
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    match /siteCommunity/{docId} {
+      allow get: if isValidId(docId) && (existing().published == true || isAdmin());
+      allow list: if existing().published == true || isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidSiteCommunity(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isAdmin() && isValidSiteCommunity(incoming())
+        && incoming().id == existing().id && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'youtubeUrl', 'telegramUrl', 'instagramUrl', 'whatsappUrl',
+          'facebookUrl', 'twitterUrl', 'popupEnabled', 'popupTitle', 'popupSubtitle',
+          'popupHighlight', 'published', 'updatedAt'
+        ]);
+      allow delete: if isValidId(docId) && isAdmin();
     }
   }
 }
