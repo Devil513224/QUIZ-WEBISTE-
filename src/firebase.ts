@@ -1,16 +1,42 @@
-import { initializeApp } from 'firebase/app';
-import { GoogleAuthProvider, getAuth } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
-import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
-import firebaseConfig from '../firebase-applet-config.json';
+import { type FirebaseApp, getApps, initializeApp } from 'firebase/app';
+import { type Auth, GoogleAuthProvider, getAuth } from 'firebase/auth';
+import { type Firestore, doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  type FirebaseStorage,
+  getDownloadURL,
+  getStorage,
+  ref,
+  uploadBytes,
+} from 'firebase/storage';
 
-export const ADMIN_EMAIL = 'tanmaypc2006@gmail.com';
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+};
 
-const app = initializeApp(firebaseConfig);
+export const isFirebaseConfigured = Boolean(
+  firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+);
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const storage = getStorage(app);
+const app: FirebaseApp | null = isFirebaseConfigured
+  ? getApps().length > 0
+    ? getApps()[0]
+    : initializeApp(firebaseConfig)
+  : null;
+
+export const db: Firestore = app ? getFirestore(app) : (null as unknown as Firestore);
+export const auth: Auth = app ? getAuth(app) : (null as unknown as Auth);
+export const storage: FirebaseStorage = app
+  ? getStorage(app)
+  : (null as unknown as FirebaseStorage);
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -48,13 +74,13 @@ export function handleFirestoreError(
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
+      userId: auth?.currentUser?.uid,
+      email: auth?.currentUser?.email,
+      emailVerified: auth?.currentUser?.emailVerified,
+      isAnonymous: auth?.currentUser?.isAnonymous,
+      tenantId: auth?.currentUser?.tenantId,
       providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
+        auth?.currentUser?.providerData?.map((provider) => ({
           providerId: provider.providerId,
           email: provider.email,
         })) || [],
@@ -67,6 +93,7 @@ export function handleFirestoreError(
 }
 
 async function testConnection() {
+  if (!isFirebaseConfigured || !db) return;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -107,33 +134,36 @@ export async function uploadMaterialPdf(
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
 
   // Attempt Firebase Storage upload first (with a timeout guard for preview environments)
-  try {
-    const storageRef = ref(storage, `study-materials/${materialId}/${safeName}`);
-    const uploadPromise = uploadBytes(storageRef, file, { contentType: 'application/pdf' });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      window.setTimeout(() => reject(new Error('Storage upload timed out')), 10000)
-    );
-    await Promise.race([uploadPromise, timeoutPromise]);
-    const pdfUrl = await getDownloadURL(storageRef);
-    return {
-      fileName: file.name,
-      fileSizeBytes: file.size,
-      pdfUrl,
-      storageMode: 'firebase-storage',
-    };
-  } catch {
-    // Fallback to inline Firestore PDF storage for PDFs <= 640KB
-    if (file.size <= 640 * 1024) {
-      const pdfDataUrl = await readFileAsDataUrl(file);
+  if (isFirebaseConfigured && storage) {
+    try {
+      const storageRef = ref(storage, `study-materials/${materialId}/${safeName}`);
+      const uploadPromise = uploadBytes(storageRef, file, { contentType: 'application/pdf' });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        window.setTimeout(() => reject(new Error('Storage upload timed out')), 10000)
+      );
+      await Promise.race([uploadPromise, timeoutPromise]);
+      const pdfUrl = await getDownloadURL(storageRef);
       return {
         fileName: file.name,
         fileSizeBytes: file.size,
-        pdfDataUrl,
-        storageMode: 'firestore-inline',
+        pdfUrl,
+        storageMode: 'firebase-storage',
       };
+    } catch {
+      // Fallback to inline Firestore PDF storage for PDFs <= 640KB
     }
-    throw new Error(
-      'Firebase Storage upload could not complete and the PDF exceeds the 640 KB inline fallback limit. Keep the PDF under 640 KB or paste an external PDF URL.'
-    );
   }
+
+  if (file.size <= 640 * 1024) {
+    const pdfDataUrl = await readFileAsDataUrl(file);
+    return {
+      fileName: file.name,
+      fileSizeBytes: file.size,
+      pdfDataUrl,
+      storageMode: 'firestore-inline',
+    };
+  }
+  throw new Error(
+    'Firebase Storage upload could not complete and the PDF exceeds the 640 KB inline fallback limit. Keep the PDF under 640 KB or paste an external PDF URL.'
+  );
 }

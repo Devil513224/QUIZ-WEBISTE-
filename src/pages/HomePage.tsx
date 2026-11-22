@@ -436,13 +436,19 @@ export const HomePage: React.FC = () => {
                 .slice(0, 3)
                 .map((test) => {
                   const count =
-                    test.questionIds && test.questionIds.length > 0
+                    test.questionCount ??
+                    test.questionLimit ??
+                    (test.questionIds && test.questionIds.length > 0
                       ? state.questions.filter(
                           (q) => q.published && test.questionIds?.includes(q.id)
                         ).length
+                      : test.type === 'Daily Quiz'
+                      ? 10
+                      : test.type === 'Mock Test'
+                      ? 50
                       : state.questions.filter(
                           (q) => q.published && test.subjectKeys.includes(q.subjectKey)
-                        ).length;
+                        ).length);
                 return (
                   <div
                     key={test.id}

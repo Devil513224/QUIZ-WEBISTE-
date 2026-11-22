@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { TYPING_PASSAGES } from '../data/demoData';
 
@@ -12,6 +12,7 @@ export const TypingPage: React.FC = () => {
   const [timeLeft, setTimeLeft] = useState(60);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
   const [result, setResult] = useState<{
     wpm: number;
     cpm: number;
@@ -22,6 +23,26 @@ export const TypingPage: React.FC = () => {
   } | null>(null);
 
   const startTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleWindowKey = (e: KeyboardEvent) => {
+      if (typeof e.getModifierState === 'function') {
+        setCapsLockOn(Boolean(e.getModifierState('CapsLock')));
+      }
+    };
+    window.addEventListener('keydown', handleWindowKey);
+    window.addEventListener('keyup', handleWindowKey);
+    return () => {
+      window.removeEventListener('keydown', handleWindowKey);
+      window.removeEventListener('keyup', handleWindowKey);
+    };
+  }, []);
+
+  const updateCapsLockState = (
+    e: React.KeyboardEvent<HTMLTextAreaElement> | React.MouseEvent<HTMLTextAreaElement>
+  ) => {
+    setCapsLockOn(e.getModifierState('CapsLock'));
+  };
 
   const passage =
     state.typingPassages.find((p) => p.published && p.lang === lang)?.text ||
@@ -157,12 +178,26 @@ export const TypingPage: React.FC = () => {
           value={typed}
           disabled={finished}
           onChange={(e) => handleInput(e.target.value)}
+          onKeyDown={updateCapsLockState}
+          onKeyUp={updateCapsLockState}
+          onClick={updateCapsLockState}
           placeholder={t.hub.typingPlaceholder}
           spellCheck={false}
           rows={3}
           aria-label={t.hub.typingPlaceholder}
           className="mt-4 w-full rounded-xl border-2 border-slate-200 bg-white p-4 text-base text-slate-900 focus:border-[#102544] focus:outline-none disabled:opacity-60 sm:text-lg dark:border-[#24385c] dark:bg-[#0b1730] dark:text-white dark:focus:border-[#facc15]"
         />
+
+        {capsLockOn && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-900 sm:text-sm dark:border-amber-700/60 dark:bg-amber-950/50 dark:text-amber-200"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>Caps Lock is ON — check letter casing while typing.</span>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <span className="font-mono-num text-sm font-semibold text-slate-700 dark:text-slate-200">

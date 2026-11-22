@@ -1,5 +1,23 @@
 {
   "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authoritative user profile and role document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetExam": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "preferredLang": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "role": { "type": "string", "enum": ["student", "admin", "super_admin"] },
+        "status": { "type": "string", "enum": ["Active", "Suspended"] },
+        "points": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "targetExam", "preferredLang", "role", "status", "points", "createdAt", "updatedAt"]
+    },
     "AdminUser": {
       "title": "AdminUser",
       "description": "Trusted admin allowlist document keyed by Firebase Auth UID.",
@@ -69,6 +87,7 @@
         "options": { "type": "array" },
         "correctIndex": { "type": "number" },
         "explanation": { "type": "string", "maxLength": 1200 },
+        "language": { "type": "string", "enum": ["English", "Bengali", "Hindi"] },
         "published": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -85,8 +104,10 @@
         "subjectKeys": { "type": "array" },
         "examIds": { "type": "array" },
         "questionIds": { "type": "array" },
+        "questionCount": { "type": "number" },
         "minutes": { "type": "number" },
         "negativeMarking": { "type": "number" },
+        "shuffle": { "type": "boolean" },
         "note": { "type": "string", "maxLength": 400 },
         "published": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -327,9 +348,13 @@
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "User profile and role document (students cannot self-assign admin or super_admin)."
+    },
     "/admins/{uid}": {
       "schema": { "$ref": "#/entities/AdminUser" },
-      "description": "Trusted admin allowlist documents."
+      "description": "Legacy admin allowlist documents."
     },
     "/usersPublic/{userId}": {
       "schema": { "$ref": "#/entities/UserPublic" },

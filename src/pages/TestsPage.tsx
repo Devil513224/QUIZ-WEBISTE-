@@ -1,9 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Clock, Download, FileText, X } from 'lucide-react';
+import { CheckCircle2, Clock, Download, FileText, LayoutGrid, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DemoLabel, EmptyState } from '../components/CommonUI';
-import { EXAM_CATEGORIES, LOGO_URL, type QuestionItem, type TestDefinition } from '../data/demoData';
+import {
+  EXAM_CATEGORIES,
+  LOGO_URL,
+  type QuestionItem,
+  type QuestionLanguage,
+  type TestDefinition,
+} from '../data/demoData';
 import { exportQuizToPdf } from '../utils/quizPdfExport';
 
 type ViewMode = 'list' | 'instructions' | 'exam' | 'result' | 'review';
@@ -11,6 +17,15 @@ type ViewMode = 'list' | 'instructions' | 'exam' | 'result' | 'review';
 const SUBJECT_NAMES: Record<'gk' | 'cs', string> = {
   gk: 'General Knowledge',
   cs: 'Computer Knowledge',
+};
+
+const shuffleQuestions = (items: QuestionItem[]): QuestionItem[] => {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 };
 
 export const TestsPage: React.FC = () => {
@@ -23,6 +38,7 @@ export const TestsPage: React.FC = () => {
 
   const [typeFilter, setTypeFilter] = useState<string>(typeParam);
   const [examFilter, setExamFilter] = useState<string>(examParam);
+  const [langFilter, setLangFilter] = useState<'All' | QuestionLanguage>('All');
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>('list');
   const [activeTest, setActiveTest] = useState<TestDefinition | null>(null);
@@ -44,6 +60,7 @@ export const TestsPage: React.FC = () => {
   const [timeUsed, setTimeUsed] = useState(0);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showPostSubmitModal, setShowPostSubmitModal] = useState(false);
+  const [paletteDrawerOpen, setPaletteDrawerOpen] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<'All' | 'Correct' | 'Incorrect' | 'Unanswered'>('All');
 
   useEffect(() => {
@@ -74,16 +91,35 @@ export const TestsPage: React.FC = () => {
     [state.questions]
   );
 
-  const getQuestionsForTest = (test: TestDefinition) => {
+  const getStoredQuestionCount = (test: TestDefinition) =>
+    test.questionCount ??
+    test.questionLimit ??
+    (test.questionIds && test.questionIds.length > 0
+      ? test.questionIds.length
+      : test.type === 'Daily Quiz'
+      ? 10
+      : test.type === 'Mock Test'
+      ? 50
+      : 20);
+
+  const getQuestionsForTest = (
+    test: TestDefinition,
+    overrideLang?: 'All' | QuestionLanguage
+  ) => {
+    const activeLang = overrideLang ?? langFilter;
     let list =
       test.questionIds && test.questionIds.length > 0
         ? publishedQuestions.filter((q) => test.questionIds?.includes(q.id))
         : publishedQuestions.filter((q) => test.subjectKeys.includes(q.subjectKey));
-    if (test.shuffle) {
-      list = [...list].sort(() => Math.random() - 0.5);
+    if (activeLang !== 'All') {
+      list = list.filter((q) => (q.language || 'English') === activeLang);
     }
-    if (test.questionLimit) {
-      list = list.slice(0, test.questionLimit);
+    if (test.shuffle || test.type === 'Daily Quiz') {
+      list = shuffleQuestions(list);
+    }
+    const limit = test.questionLimit ?? test.questionCount;
+    if (limit && limit > 0) {
+      list = list.slice(0, limit);
     }
     return list;
   };
@@ -125,7 +161,10 @@ export const TestsPage: React.FC = () => {
 
   const beginExam = (test: TestDefinition) => {
     const qs = getQuestionsForTest(test);
-    if (!qs.length) return;
+    if (!qs.length) {
+      showToast('No published questions match the selected test or language.');
+      return;
+    }
     setActiveTest(test);
     setExamQuestions(qs);
     setCurIdx(0);
@@ -136,6 +175,7 @@ export const TestsPage: React.FC = () => {
     setTimeUsed(0);
     setShowSubmitModal(false);
     setShowPostSubmitModal(false);
+    setPaletteDrawerOpen(false);
     setView('exam');
   };
 
@@ -206,7 +246,8 @@ export const TestsPage: React.FC = () => {
   ];
 
   if (view === 'instructions' && activeTest) {
-    const qCount = getQuestionsForTest(activeTest).length;
+    const availCount = getQuestionsForTest(activeTest).length;
+    const qCount = activeTest.id === 'custom' ? availCount : getStoredQuestionCount(activeTest);
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 dark:border-[#24385c] dark:bg-[#122443]">
@@ -250,7 +291,7 @@ export const TestsPage: React.FC = () => {
             </button>
             <button
               type="button"
-              disabled={pdfBusyId === activeTest.id || qCount === 0}
+              disabled={pdfBusyId === activeTest.id || availCount === 0}
               onClick={() => void handleDownloadTestPdf(activeTest)}
               className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
             >
@@ -259,8 +300,9 @@ export const TestsPage: React.FC = () => {
             </button>
             <button
               type="button"
+              disabled={availCount === 0}
               onClick={() => beginExam(activeTest)}
-              className="inline-flex h-10 items-center justify-center rounded-xl bg-[#facc15] px-6 text-sm font-bold text-[#102544] hover:brightness-95"
+              className="inline-flex h-10 items-center justify-center rounded-xl bg-[#facc15] px-6 text-sm font-bold text-[#102544] hover:brightness-95 disabled:opacity-50"
             >
               {t.home.startTest}
             </button>
@@ -279,6 +321,7 @@ export const TestsPage: React.FC = () => {
     const goToQuestion = (idx: number) => {
       setCurIdx(idx);
       setVisited((prev) => ({ ...prev, [idx]: true }));
+      setPaletteDrawerOpen(false);
     };
 
     const paletteStyle = (idx: number) => {
@@ -293,7 +336,7 @@ export const TestsPage: React.FC = () => {
     };
 
     return (
-      <div className="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-6">
+      <div className="mx-auto max-w-7xl px-3 py-5 pb-24 sm:px-6 sm:py-6 lg:pb-6">
         {/* Top Exam Header Bar */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#102544] px-4 py-3 text-white sm:px-5 sm:py-3.5">
           <div className="min-w-0">
@@ -410,8 +453,8 @@ export const TestsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Question Palette */}
-          <aside className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 lg:col-span-4 dark:border-[#24385c] dark:bg-[#122443]">
+          {/* Desktop Question Palette */}
+          <aside className="hidden flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 lg:col-span-4 lg:flex dark:border-[#24385c] dark:bg-[#122443]">
             <div>
               <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
                 {t.tests.questionPalette}
@@ -477,6 +520,112 @@ export const TestsPage: React.FC = () => {
             </div>
           </aside>
         </div>
+
+        {/* Mobile Floating Palette Button */}
+        <button
+          type="button"
+          onClick={() => setPaletteDrawerOpen(true)}
+          className="fixed bottom-5 right-4 z-40 inline-flex items-center gap-2 rounded-full bg-[#102544] px-4 py-3 text-sm font-bold text-white shadow-xl ring-2 ring-[#facc15] lg:hidden dark:bg-[#facc15] dark:text-[#102544] dark:ring-[#102544]"
+        >
+          <LayoutGrid className="h-4 w-4" />
+          <span>Palette</span>
+          <span className="rounded-full bg-white/20 px-2 py-0.5 font-mono-num text-xs dark:bg-[#102544]/15">
+            {answeredCount}/{examQuestions.length}
+          </span>
+        </button>
+
+        {/* Mobile Bottom Drawer Question Palette */}
+        {paletteDrawerOpen && (
+          <div
+            className="fixed inset-0 z-50 lg:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.tests.questionPalette}
+          >
+            <div
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+              onClick={() => setPaletteDrawerOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-x-0 bottom-0 z-10 max-h-[82vh] overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white p-5 shadow-2xl dark:border-[#24385c] dark:bg-[#122443]">
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                  {t.tests.questionPalette}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setPaletteDrawerOpen(false)}
+                  aria-label="Close palette"
+                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-[#16294b]"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {examQuestions.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => goToQuestion(idx)}
+                    aria-label={`Question ${idx + 1}`}
+                    className={`grid h-9 w-9 place-items-center rounded-lg font-mono-num text-xs font-bold ${paletteStyle(
+                      idx
+                    )} ${idx === curIdx ? 'ring-2 ring-[#facc15] ring-offset-2 dark:ring-offset-[#122443]' : ''}`}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-[#9fb0c8]">
+                <div className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded bg-emerald-600" />
+                  <span>{t.tests.answered}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded bg-red-600" />
+                  <span>{t.tests.notAnswered}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded-full bg-purple-600" />
+                  <span>{t.tests.marked}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 rounded bg-[#eef2f8] dark:bg-[#16294b]" />
+                  <span>{t.tests.notVisited}</span>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaletteDrawerOpen(false);
+                    setShowSubmitModal(true);
+                  }}
+                  className="h-11 w-full rounded-xl bg-[#facc15] text-sm font-bold text-[#102544] hover:brightness-95"
+                >
+                  {t.tests.submitTest}
+                </button>
+                <button
+                  type="button"
+                  disabled={pdfBusyId === activeTest.id}
+                  onClick={() => void handleDownloadTestPdf(activeTest, examQuestions, false)}
+                  className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>
+                    {pdfBusyId === activeTest.id
+                      ? 'Generating PDF…'
+                      : 'Download Question Paper PDF'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Submit Confirmation Modal */}
         {showSubmitModal && (
@@ -963,7 +1112,9 @@ export const TestsPage: React.FC = () => {
     const matchesType = typeFilter === 'All' || test.type === typeFilter;
     const matchesExam =
       examFilter === 'All' || (test.examIds || []).includes(examFilter);
-    return matchesType && matchesExam;
+    const matchesLang =
+      langFilter === 'All' || getQuestionsForTest(test, langFilter).length > 0;
+    return matchesType && matchesExam && matchesLang;
   });
 
   const handleCreateCustom = () => {
@@ -975,7 +1126,10 @@ export const TestsPage: React.FC = () => {
       return;
     }
     setCustomErr('');
-    const avail = publishedQuestions.filter((q) => secs.includes(q.subjectKey)).length;
+    const avail = publishedQuestions.filter(
+      (q) => secs.includes(q.subjectKey) && (langFilter === 'All' || (q.language || 'English') === langFilter)
+    ).length;
+    const count = Math.min(customCount, avail);
     const customTest: TestDefinition = {
       id: 'custom',
       type: 'Custom Practice',
@@ -983,7 +1137,8 @@ export const TestsPage: React.FC = () => {
       subjectKeys: secs,
       minutes: customMins,
       negativeMarking: 0,
-      questionLimit: Math.min(customCount, avail),
+      questionCount: count,
+      questionLimit: count,
       shuffle: true,
     };
     setActiveTest(customTest);
@@ -1015,19 +1170,33 @@ export const TestsPage: React.FC = () => {
           ))}
         </div>
 
-        <select
-          aria-label="Filter by exam"
-          value={examFilter}
-          onChange={(e) => setExamFilter(e.target.value)}
-          className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-100"
-        >
-          <option value="All">All Exam Categories</option>
-          {EXAM_CATEGORIES.map((ex) => (
-            <option key={ex.id} value={ex.id}>
-              {ex.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Filter by language"
+            value={langFilter}
+            onChange={(e) => setLangFilter(e.target.value as 'All' | QuestionLanguage)}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-100"
+          >
+            <option value="All">All Languages</option>
+            <option value="English">English</option>
+            <option value="Bengali">Bengali</option>
+            <option value="Hindi">Hindi</option>
+          </select>
+
+          <select
+            aria-label="Filter by exam"
+            value={examFilter}
+            onChange={(e) => setExamFilter(e.target.value)}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-100"
+          >
+            <option value="All">All Exam Categories</option>
+            {EXAM_CATEGORIES.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {visibleTests.length === 0 ? (
@@ -1036,13 +1205,15 @@ export const TestsPage: React.FC = () => {
             onReset={() => {
               setTypeFilter('All');
               setExamFilter('All');
+              setLangFilter('All');
             }}
           />
         </div>
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {visibleTests.map((test) => {
-            const count = getQuestionsForTest(test).length;
+            const availCount = getQuestionsForTest(test).length;
+            const count = getStoredQuestionCount(test);
             const examNames = (test.examIds || [])
               .map((eid) => EXAM_CATEGORIES.find((e) => e.id === eid)?.name)
               .filter(Boolean) as string[];
@@ -1093,7 +1264,7 @@ export const TestsPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    disabled={pdfBusyId === test.id || count === 0}
+                    disabled={pdfBusyId === test.id || availCount === 0}
                     onClick={() => void handleDownloadTestPdf(test)}
                     className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
                   >

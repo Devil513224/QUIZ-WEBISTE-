@@ -1,9 +1,13 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
   type User,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateProfile as updateFirebaseAuthProfile,
 } from 'firebase/auth';
 import {
   collection,
@@ -40,19 +44,22 @@ import {
   type NotificationItem,
   type PdfBrandingConfig,
   type QuestionItem,
+  type QuestionLanguage,
   type SiteCommunityConfig,
   type StudyMaterialItem,
   type TestDefinition,
   type TypingPassageItem,
 } from '../data/demoData';
 import {
-  ADMIN_EMAIL,
   OperationType,
   auth,
   db,
   googleProvider,
   handleFirestoreError,
+  isFirebaseConfigured,
 } from '../firebase';
+
+export type UserRole = 'student' | 'admin' | 'super_admin';
 
 export interface TypingAttempt {
   id: string;
@@ -253,8 +260,13 @@ interface AppContextValue {
   showToast: (msg: string) => void;
   authReady: boolean;
   firebaseUser: User | null;
+  userRole: UserRole;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   signInWithGoogle: () => Promise<void>;
+  registerWithEmail: (name: string, email: string, password: string) => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   signOutUser: () => Promise<void>;
   toggleTheme: () => void;
   setLanguage: (lang: LanguageCode) => void;
@@ -316,10 +328,11 @@ const cleanId = (raw: string, fallbackPrefix: string) => {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<PersistedState>(getInitialState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [authReady, setAuthReady] = useState(false);
+  const [authReady, setAuthReady] = useState(!isFirebaseConfigured);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const didAutoSeedRef = useRef(false);
+  const [userRole, setUserRole] = useState<UserRole>('student');
+  const isSuperAdmin = userRole === 'super_admin';
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 
   useEffect(() => {
     const root = document.documentElement;
@@ -357,7 +370,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [toastMessage]);
 
   const logAdminActivity = useCallback(async (actionText: string) => {
-    if (!auth.currentUser) return;
+    if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
     const logId = `lg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const now = new Date();
     const timeStr = `${now.toISOString().slice(0, 10)} ${now.toISOString().slice(11, 16)}`;
@@ -377,7 +390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const seedFirestoreCatalog = useCallback(
     async (silent = false) => {
-      if (!auth.currentUser) return;
+      if (!isFirebaseConfigured || !db || !auth?.currentUser) return;
       const batch = writeBatch(db);
 
       INITIAL_QUESTIONS.forEach((q) => {
@@ -389,12 +402,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           options: q.options,
           correctIndex: q.correctIndex,
           explanation: q.explanation,
+          language: q.language || 'English',
           published: q.published,
           updatedAt: serverTimestamp(),
         });
       });
 
       INITIAL_TESTS.forEach((tst) => {
+        const defaultCount =
+          tst.type === 'Daily Quiz' ? 10 : tst.type === 'Mock Test' ? 50 : 20;
         batch.set(doc(db, 'tests', tst.id), {
           id: tst.id,
           type: tst.type,
@@ -402,8 +418,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           subjectKeys: tst.subjectKeys,
           examIds: tst.examIds || [],
           questionIds: tst.questionIds || [],
+          questionCount: tst.questionCount ?? tst.questionLimit ?? defaultCount,
           minutes: tst.minutes,
           negativeMarking: tst.negativeMarking,
+          shuffle: Boolean(tst.shuffle ?? tst.type === 'Daily Quiz'),
           note: tst.note || '',
           published: tst.published ?? true,
           updatedAt: serverTimestamp(),
@@ -589,109 +607,134 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [logAdminActivity, showToast]
   );
 
-  // Firebase Auth listener + User profile bootstrap
+  // Firebase Auth listener + Firestore users/{uid} role & profile bootstrap
   useEffect(() => {
+    if (!isFirebaseConfigured || !auth || !db) {
+      setFirebaseUser(null);
+      setUserRole('student');
+      setAuthReady(true);
+      return;
+    }
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (!user) {
-        setIsAdmin(false);
+        setUserRole('student');
         setAuthReady(true);
         return;
       }
 
-      let adminFlag = Boolean(user.emailVerified && user.email === ADMIN_EMAIL);
-      if (!adminFlag && user.emailVerified) {
-        try {
-          const adminSnap = await getDoc(doc(db, 'admins', user.uid));
-          adminFlag = adminSnap.exists();
-        } catch {
-          adminFlag = false;
+      const rawName = (user.displayName || '').trim();
+      const safeDisplayName =
+        rawName.length >= 2 && !rawName.includes('@')
+          ? rawName.slice(0, 80)
+          : `Learner_${user.uid.slice(0, 5)}`;
+
+      let resolvedRole: UserRole = 'student';
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            uid: user.uid,
+            email: (user.email || '').slice(0, 200),
+            displayName: safeDisplayName,
+            targetExam: 'SSC',
+            preferredLang: 'English',
+            role: 'student',
+            status: 'Active',
+            points: 100,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          setState((prev) => ({
+            ...prev,
+            profile: {
+              ...prev.profile,
+              name: safeDisplayName,
+              email: user.email || '',
+            },
+          }));
+        } else {
+          const data = userSnap.data();
+          const rawRole = String(data.role || 'student');
+          resolvedRole =
+            rawRole === 'super_admin' || rawRole === 'admin' ? rawRole : 'student';
+          setState((prev) => ({
+            ...prev,
+            profile: {
+              name: String(data.displayName || safeDisplayName),
+              email: user.email || String(data.email || ''),
+              exam: String(data.targetExam || 'SSC'),
+              language: String(data.preferredLang || 'English'),
+            },
+          }));
         }
+      } catch {
+        resolvedRole = 'student';
       }
-      setIsAdmin(adminFlag);
+
+      setUserRole(resolvedRole);
       setAuthReady(true);
 
-      // Sync signed-in user documents & progress if verified
-      if (user.emailVerified) {
-        try {
-          const pubRef = doc(db, 'usersPublic', user.uid);
-          const pubSnap = await getDoc(pubRef);
-          const rawName = (user.displayName || '').trim();
-          const safeDisplayName =
-            rawName.length >= 3 && !rawName.includes('@')
-              ? rawName.slice(0, 80)
-              : `Learner_${user.uid.slice(0, 5)}`;
-
-          if (!pubSnap.exists()) {
-            await setDoc(pubRef, {
-              uid: user.uid,
-              displayName: safeDisplayName,
-              targetExam: 'SSC',
-              preferredLang: 'English',
-              status: 'Active',
-              points: 100,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
-          } else {
-            const data = pubSnap.data();
-            setState((prev) => ({
-              ...prev,
-              profile: {
-                name: String(data.displayName || safeDisplayName),
-                email: user.email || '',
-                exam: String(data.targetExam || 'SSC'),
-                language: String(data.preferredLang || 'English'),
-              },
-            }));
-          }
-
-          await setDoc(
-            doc(db, 'usersPrivate', user.uid),
-            {
-              uid: user.uid,
-              email: (user.email || '').slice(0, 200),
-              updatedAt: serverTimestamp(),
+      // Sync signed-in user progress
+      try {
+        const progSnap = await getDoc(doc(db, 'userProgress', user.uid));
+        if (progSnap.exists()) {
+          const p = progSnap.data();
+          setState((prev) => ({
+            ...prev,
+            savedMaterials: Array.isArray(p.savedMaterials) ? p.savedMaterials : prev.savedMaterials,
+            completedLessons: Array.isArray(p.completedLessons)
+              ? p.completedLessons
+              : prev.completedLessons,
+            syllabusChecked: Array.isArray(p.syllabusChecked)
+              ? p.syllabusChecked
+              : prev.syllabusChecked,
+            typingHistory: Array.isArray(p.typingHistory) ? p.typingHistory : prev.typingHistory,
+            testHistory: Array.isArray(p.testHistory) ? p.testHistory : prev.testHistory,
+            planner: p.planner ? { ...prev.planner, ...p.planner } : prev.planner,
+            notifications: {
+              readIds: Array.isArray(p.readNotifIds)
+                ? p.readNotifIds
+                : prev.notifications.readIds,
+              clearedIds: Array.isArray(p.clearedNotifIds)
+                ? p.clearedNotifIds
+                : prev.notifications.clearedIds,
             },
-            { merge: true }
-          );
-
-          const progSnap = await getDoc(doc(db, 'userProgress', user.uid));
-          if (progSnap.exists()) {
-            const p = progSnap.data();
-            setState((prev) => ({
-              ...prev,
-              savedMaterials: Array.isArray(p.savedMaterials) ? p.savedMaterials : prev.savedMaterials,
-              completedLessons: Array.isArray(p.completedLessons)
-                ? p.completedLessons
-                : prev.completedLessons,
-              syllabusChecked: Array.isArray(p.syllabusChecked)
-                ? p.syllabusChecked
-                : prev.syllabusChecked,
-              typingHistory: Array.isArray(p.typingHistory) ? p.typingHistory : prev.typingHistory,
-              testHistory: Array.isArray(p.testHistory) ? p.testHistory : prev.testHistory,
-              planner: p.planner ? { ...prev.planner, ...p.planner } : prev.planner,
-              notifications: {
-                readIds: Array.isArray(p.readNotifIds)
-                  ? p.readNotifIds
-                  : prev.notifications.readIds,
-                clearedIds: Array.isArray(p.clearedNotifIds)
-                  ? p.clearedNotifIds
-                  : prev.notifications.clearedIds,
-              },
-            }));
-          }
-        } catch {
-          // Graceful non-fatal sync if user profile doc creation is restricted
+          }));
         }
+      } catch {
+        // Non-fatal if userProgress doesn't exist yet
       }
     });
     return () => unsub();
   }, []);
 
+  // Keep user role synced live if updated in Firestore
+  useEffect(() => {
+    if (!isFirebaseConfigured || !db || !firebaseUser) return;
+    const unsub = onSnapshot(
+      doc(db, 'users', firebaseUser.uid),
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const rawRole = String(data.role || 'student');
+        const nextRole: UserRole =
+          rawRole === 'super_admin' || rawRole === 'admin' ? rawRole : 'student';
+        setUserRole(nextRole);
+      },
+      () => {
+        // Ignore transient permission errors on sign-out
+      }
+    );
+    return () => unsub();
+  }, [firebaseUser]);
+
   // Firestore Real-time Subscriptions
   useEffect(() => {
-    if (!authReady) return;
+    if (!authReady || !isFirebaseConfigured || !db) return;
     const unsubs: Array<() => void> = [];
 
     const makePublicOrAdminQuery = (colName: string, visibilityField = 'published') =>
@@ -704,14 +747,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       onSnapshot(
         makePublicOrAdminQuery('questions'),
         (snap) => {
-          if (snap.empty) {
-            if (isAdmin && !didAutoSeedRef.current) {
-              didAutoSeedRef.current = true;
-              void seedFirestoreCatalog(true);
-            }
-            return;
-          }
-          const list = snap.docs.map((d) => d.data() as QuestionItem);
+          if (snap.empty) return;
+          const list = snap.docs.map((d) => {
+            const data = d.data() as QuestionItem;
+            const rawLang = data.language;
+            const language: QuestionLanguage =
+              rawLang === 'Bengali' || rawLang === 'Hindi' ? rawLang : 'English';
+            return {
+              ...data,
+              language,
+            };
+          });
           setState((prev) => ({ ...prev, questions: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'questions')
@@ -730,6 +776,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...data,
               examIds: Array.isArray(data.examIds) ? data.examIds : [],
               questionIds: Array.isArray(data.questionIds) ? data.questionIds : [],
+              questionCount:
+                typeof data.questionCount === 'number'
+                  ? data.questionCount
+                  : typeof data.questionLimit === 'number'
+                    ? data.questionLimit
+                    : undefined,
+              shuffle: Boolean(data.shuffle ?? data.type === 'Daily Quiz'),
             };
           });
           setState((prev) => ({ ...prev, tests: list }));
@@ -996,13 +1049,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isAdmin) {
       unsubs.push(
         onSnapshot(
-          collection(db, 'usersPublic'),
+          collection(db, 'users'),
           (snap) => {
             const rows: GenericRow[] = snap.docs.map((d) => {
               const data = d.data();
               return {
                 id: d.id,
                 name: String(data.displayName || d.id),
+                email: String(data.email || ''),
+                role: String(data.role || 'student'),
                 exam: String(data.targetExam || 'SSC'),
                 status: String(data.status || 'Active'),
                 points: String(data.points ?? 0),
@@ -1014,7 +1069,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               adminTables: { ...prev.adminTables, students: rows },
             }));
           },
-          (err) => handleFirestoreError(err, OperationType.LIST, 'usersPublic')
+          (err) => handleFirestoreError(err, OperationType.LIST, 'users')
         )
       );
 
@@ -1071,12 +1126,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       unsubs.forEach((fn) => fn());
     };
-  }, [authReady, isAdmin, seedFirestoreCatalog]);
+  }, [authReady, isAdmin]);
 
   // Persist user progress to Firestore when signed in
   const persistProgressToFirestore = useCallback(async (nextState: PersistedState) => {
+    if (!isFirebaseConfigured || !db || !auth) return;
     const user = auth.currentUser;
-    if (!user || !user.emailVerified) return;
+    if (!user) return;
     try {
       await setDoc(doc(db, 'userProgress', user.uid), {
         uid: user.uid,
@@ -1096,10 +1152,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const signInWithGoogle = async () => {
+    if (!isFirebaseConfigured || !auth) {
+      throw new Error('Firebase is not configured yet.');
+    }
     await signInWithPopup(auth, googleProvider);
   };
 
+  const registerWithEmail = async (name: string, email: string, password: string) => {
+    if (!isFirebaseConfigured || !auth || !db) {
+      throw new Error('Firebase is not configured yet.');
+    }
+    const cleanEmail = email.trim();
+    const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    const safeName = name.trim().slice(0, 80) || `Learner_${cred.user.uid.slice(0, 5)}`;
+    await updateFirebaseAuthProfile(cred.user, { displayName: safeName });
+    await setDoc(doc(db, 'users', cred.user.uid), {
+      uid: cred.user.uid,
+      email: (cred.user.email || cleanEmail).slice(0, 200),
+      displayName: safeName,
+      targetExam: 'SSC',
+      preferredLang: 'English',
+      role: 'student',
+      status: 'Active',
+      points: 100,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const signInWithEmail = async (email: string, password: string) => {
+    if (!isFirebaseConfigured || !auth) {
+      throw new Error('Firebase is not configured yet.');
+    }
+    await signInWithEmailAndPassword(auth, email.trim(), password);
+  };
+
+  const resetPassword = async (email: string) => {
+    if (!isFirebaseConfigured || !auth) {
+      throw new Error('Firebase is not configured yet.');
+    }
+    await sendPasswordResetEmail(auth, email.trim());
+  };
+
   const signOutUser = async () => {
+    if (!isFirebaseConfigured || !auth) return;
     await signOut(auth);
     showToast('Signed out.');
   };
@@ -1260,11 +1356,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateProfile = async (profile: UserProfile) => {
     setState((prev) => ({ ...prev, profile }));
-    const user = auth.currentUser;
-    if (user && user.emailVerified) {
-      const path = `usersPublic/${user.uid}`;
+    const user = auth?.currentUser;
+    if (user && isFirebaseConfigured && db) {
+      const path = `users/${user.uid}`;
       try {
-        await updateDoc(doc(db, 'usersPublic', user.uid), {
+        await updateDoc(doc(db, 'users', user.uid), {
           displayName: profile.name.slice(0, 80),
           targetExam: profile.exam.slice(0, 80),
           preferredLang: profile.language.slice(0, 40),
@@ -1280,6 +1376,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const saveQuestionDoc = async (item: QuestionItem) => {
     const id = cleanId(item.id, 'q');
     const path = `questions/${id}`;
+    const lang: QuestionLanguage =
+      item.language === 'Bengali' || item.language === 'Hindi' ? item.language : 'English';
     try {
       await setDoc(doc(db, 'questions', id), {
         id,
@@ -1289,6 +1387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         options: item.options.slice(0, 6),
         correctIndex: item.correctIndex,
         explanation: item.explanation.slice(0, 1200),
+        language: lang,
         published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
@@ -1308,6 +1407,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const batch = writeBatch(db);
         chunk.forEach((item, idx) => {
           const id = cleanId(item.id || `q_${Date.now()}_${i + idx}`, 'q');
+          const lang: QuestionLanguage =
+            item.language === 'Bengali' || item.language === 'Hindi' ? item.language : 'English';
           savedIds.push(id);
           batch.set(doc(db, 'questions', id), {
             id,
@@ -1317,6 +1418,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             options: item.options.slice(0, 6),
             correctIndex: Math.max(0, Math.min(item.options.length - 1, item.correctIndex)),
             explanation: item.explanation.slice(0, 1200),
+            language: lang,
             published: Boolean(item.published),
             updatedAt: serverTimestamp(),
           });
@@ -1343,6 +1445,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const saveTestDoc = async (item: TestDefinition) => {
     const id = cleanId(item.id, 'tst');
     const path = `tests/${id}`;
+    const defaultCount =
+      item.type === 'Daily Quiz' ? 10 : item.type === 'Mock Test' ? 50 : 20;
+    const resolvedCount = Math.max(
+      1,
+      Math.min(500, Number(item.questionCount ?? item.questionLimit) || defaultCount)
+    );
     try {
       const payload: Record<string, unknown> = {
         id,
@@ -1351,8 +1459,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         subjectKeys: item.subjectKeys.length ? item.subjectKeys.slice(0, 10) : ['gk'],
         examIds: (item.examIds || []).slice(0, 20),
         questionIds: (item.questionIds || []).slice(0, 200),
+        questionCount: resolvedCount,
         minutes: Math.max(1, Math.min(360, Number(item.minutes) || 5)),
         negativeMarking: Math.max(0, Math.min(5, Number(item.negativeMarking) || 0)),
+        shuffle: Boolean(item.shuffle ?? item.type === 'Daily Quiz'),
         published: item.published ?? true,
         updatedAt: serverTimestamp(),
       };
@@ -1767,9 +1877,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleStudentStatusDoc = async (uid: string, nextStatus: 'Active' | 'Suspended') => {
-    const path = `usersPublic/${uid}`;
+    const path = `users/${uid}`;
     try {
-      await updateDoc(doc(db, 'usersPublic', uid), {
+      await updateDoc(doc(db, 'users', uid), {
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
@@ -1796,8 +1906,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         showToast,
         authReady,
         firebaseUser,
+        userRole,
         isAdmin,
+        isSuperAdmin,
         signInWithGoogle,
+        registerWithEmail,
+        signInWithEmail,
+        resetPassword,
         signOutUser,
         toggleTheme,
         setLanguage,

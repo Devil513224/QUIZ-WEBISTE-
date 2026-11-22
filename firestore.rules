@@ -32,11 +32,22 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserRole() {
+      return hasUserDoc()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'student';
+    }
+
     function isAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'tanmaypc2006@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isSignedIn() && (currentUserRole() == 'admin' || currentUserRole() == 'super_admin');
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && currentUserRole() == 'super_admin';
     }
 
     function isOptString(data, field, maxLen) {
@@ -48,6 +59,27 @@ service cloud.firestore {
     }
 
     // Entity Validators
+    function isValidUserAccount(data) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'targetExam', 'preferredLang',
+          'role', 'status', 'points', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'targetExam', 'preferredLang',
+          'role', 'status', 'points', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80
+        && data.targetExam is string && data.targetExam.size() >= 1 && data.targetExam.size() <= 80
+        && data.preferredLang is string && data.preferredLang.size() >= 1 && data.preferredLang.size() <= 40
+        && (data.role == 'student' || data.role == 'admin' || data.role == 'super_admin')
+        && (data.status == 'Active' || data.status == 'Suspended')
+        && (data.points is int || data.points is float) && data.points >= 0 && data.points <= 10000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidAdminUser(data) {
       return data.keys().hasAll(['uid', 'email', 'role', 'createdAt'])
         && data.keys().hasOnly(['uid', 'email', 'role', 'createdAt'])
@@ -106,7 +138,7 @@ service cloud.firestore {
 
     function isValidQuestion(data) {
       return data.keys().hasAll(['id', 'subjectKey', 'subjectName', 'question', 'options', 'correctIndex', 'explanation', 'published', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'subjectKey', 'subjectName', 'question', 'options', 'correctIndex', 'explanation', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'subjectKey', 'subjectName', 'question', 'options', 'correctIndex', 'explanation', 'language', 'published', 'updatedAt'])
         && isValidId(data.id)
         && data.subjectKey is string && data.subjectKey.size() >= 1 && data.subjectKey.size() <= 32
         && data.subjectName is string && data.subjectName.size() >= 1 && data.subjectName.size() <= 80
@@ -114,21 +146,24 @@ service cloud.firestore {
         && data.options is list && data.options.size() >= 2 && data.options.size() <= 6 && data.options[0] is string
         && data.correctIndex is int && data.correctIndex >= 0 && data.correctIndex < data.options.size()
         && data.explanation is string && data.explanation.size() <= 1200
+        && (!('language' in data) || (data.language == 'English' || data.language == 'Bengali' || data.language == 'Hindi'))
         && data.published is bool
         && data.updatedAt is timestamp;
     }
 
     function isValidTest(data) {
       return data.keys().hasAll(['id', 'type', 'name', 'subjectKeys', 'minutes', 'negativeMarking', 'published', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'published', 'updatedAt'])
         && isValidId(data.id)
         && (data.type == 'Daily Quiz' || data.type == 'Mock Test' || data.type == 'Sectional Test' || data.type == 'Previous-Year Paper' || data.type == 'Custom Practice')
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 160
         && data.subjectKeys is list && data.subjectKeys.size() >= 1 && data.subjectKeys.size() <= 10 && data.subjectKeys[0] is string
         && (!('examIds' in data) || (data.examIds is list && data.examIds.size() <= 20))
         && (!('questionIds' in data) || (data.questionIds is list && data.questionIds.size() <= 200))
+        && (!('questionCount' in data) || ((data.questionCount is int || data.questionCount is float) && data.questionCount >= 1 && data.questionCount <= 500))
         && (data.minutes is int || data.minutes is float) && data.minutes >= 1 && data.minutes <= 360
         && (data.negativeMarking is int || data.negativeMarking is float) && data.negativeMarking >= 0 && data.negativeMarking <= 5
+        && (!('shuffle' in data) || data.shuffle is bool)
         && isOptString(data, 'note', 400)
         && data.published is bool
         && data.updatedAt is timestamp;
@@ -330,29 +365,53 @@ service cloud.firestore {
       allow get: if resource == null || resource.data.published == true || isAdmin() || isSignedIn();
     }
 
-    // Admin Allowlist
+    // Authoritative User Accounts & Roles (students can never self-assign admin/super_admin)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isOwner(userId)
+        && isValidUserAccount(incoming())
+        && incoming().uid == userId
+        && incoming().role == 'student'
+        && incoming().status == 'Active'
+        && incoming().points >= 0 && incoming().points <= 500
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) && isValidUserAccount(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isSuperAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'targetExam', 'preferredLang', 'role', 'status', 'points', 'updatedAt'])) ||
+          (isAdmin() && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'targetExam', 'preferredLang', 'status', 'points', 'updatedAt'])) ||
+          (isOwner(userId) && incoming().role == existing().role && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'targetExam', 'preferredLang', 'points', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isSuperAdmin();
+    }
+
+    // Legacy Admin Allowlist (Super Admin managed only)
     match /admins/{uid} {
       allow get: if isValidId(uid) && (isOwner(uid) || isAdmin());
       allow list: if isAdmin();
-      allow create: if isValidId(uid) && isAdmin() && isValidAdminUser(incoming()) && incoming().createdAt == request.time;
-      allow update: if isValidId(uid) && isAdmin() && isValidAdminUser(incoming())
+      allow create: if isValidId(uid) && isSuperAdmin() && isValidAdminUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(uid) && isSuperAdmin() && isValidAdminUser(incoming())
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role']);
-      allow delete: if isValidId(uid) && isAdmin();
+      allow delete: if isValidId(uid) && isSuperAdmin();
     }
 
     // User Public (non-PII)
     match /usersPublic/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin();
-      allow create: if isValidId(userId) && isVerifiedUser() && (isOwner(userId) || isAdmin())
+      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin())
         && isValidUserPublic(incoming())
         && incoming().uid == userId
         && (isAdmin() || incoming().status == 'Active')
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
-      allow update: if isValidId(userId) && isVerifiedUser() && isValidUserPublic(incoming())
+      allow update: if isValidId(userId) && isValidUserPublic(incoming())
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
@@ -367,11 +426,11 @@ service cloud.firestore {
     match /usersPrivate/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin();
-      allow create: if isValidId(userId) && isVerifiedUser() && (isOwner(userId) || isAdmin())
+      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin())
         && isValidUserPrivate(incoming())
         && incoming().uid == userId
         && incoming().updatedAt == request.time;
-      allow update: if isValidId(userId) && isVerifiedUser() && (isOwner(userId) || isAdmin())
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin())
         && isValidUserPrivate(incoming())
         && incoming().uid == existing().uid
         && incoming().updatedAt == request.time
@@ -383,11 +442,11 @@ service cloud.firestore {
     match /userProgress/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isAdmin();
-      allow create: if isValidId(userId) && isVerifiedUser() && (isOwner(userId) || isAdmin())
+      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin())
         && isValidUserProgress(incoming())
         && incoming().uid == userId
         && incoming().updatedAt == request.time;
-      allow update: if isValidId(userId) && isVerifiedUser() && (isOwner(userId) || isAdmin())
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin())
         && isValidUserProgress(incoming())
         && incoming().uid == existing().uid
         && incoming().updatedAt == request.time
@@ -405,7 +464,7 @@ service cloud.firestore {
       allow create: if isValidId(questionId) && isAdmin() && isValidQuestion(incoming()) && incoming().updatedAt == request.time;
       allow update: if isValidId(questionId) && isAdmin() && isValidQuestion(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['subjectKey', 'subjectName', 'question', 'options', 'correctIndex', 'explanation', 'published', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['subjectKey', 'subjectName', 'question', 'options', 'correctIndex', 'explanation', 'language', 'published', 'updatedAt']);
       allow delete: if isValidId(questionId) && isAdmin();
     }
 
@@ -415,7 +474,7 @@ service cloud.firestore {
       allow create: if isValidId(testId) && isAdmin() && isValidTest(incoming()) && incoming().updatedAt == request.time;
       allow update: if isValidId(testId) && isAdmin() && isValidTest(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'minutes', 'negativeMarking', 'note', 'published', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'published', 'updatedAt']);
       allow delete: if isValidId(testId) && isAdmin();
     }
 

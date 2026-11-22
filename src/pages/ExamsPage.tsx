@@ -34,7 +34,16 @@ export const ExamsPage: React.FC = () => {
       test.questionIds && test.questionIds.length > 0
         ? publishedQuestions.filter((q) => test.questionIds?.includes(q.id))
         : publishedQuestions.filter((q) => test.subjectKeys.includes(q.subjectKey));
-    if (test.questionLimit) list = list.slice(0, test.questionLimit);
+    if (test.shuffle || test.type === 'Daily Quiz') {
+      const copy = [...list];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      list = copy;
+    }
+    const limit = test.questionLimit ?? test.questionCount;
+    if (limit && limit > 0) list = list.slice(0, limit);
     return list;
   };
 
@@ -141,7 +150,11 @@ export const ExamsPage: React.FC = () => {
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               {examTests.map((tst) => {
-                const qCount = getQuestionsForTest(tst).length;
+                const availCount = getQuestionsForTest(tst).length;
+                const qCount =
+                  tst.questionCount ??
+                  tst.questionLimit ??
+                  (tst.type === 'Daily Quiz' ? 10 : tst.type === 'Mock Test' ? 50 : availCount);
                 return (
                   <div
                     key={tst.id}
@@ -172,7 +185,7 @@ export const ExamsPage: React.FC = () => {
                       </Link>
                       <button
                         type="button"
-                        disabled={pdfBusyId === tst.id || qCount === 0}
+                        disabled={pdfBusyId === tst.id || availCount === 0}
                         onClick={() => void handleDownloadPdf(tst)}
                         className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-200"
                       >

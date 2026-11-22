@@ -135,7 +135,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           {/* Brand */}
           <Link
             to="/"
-            className="flex min-w-0 shrink items-center gap-1.5 whitespace-nowrap font-display text-[13px] font-extrabold tracking-tight text-[#102544] sm:shrink-0 sm:gap-2.5 sm:text-lg dark:text-white"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap font-display text-sm font-extrabold tracking-tight text-[#102544] sm:gap-2.5 sm:text-lg dark:text-white"
           >
             <img
               src={LOGO_URL}
@@ -143,7 +143,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               className="h-8 w-8 shrink-0 rounded-full object-cover sm:h-10 sm:w-10"
               referrerPolicy="no-referrer"
             />
-            <span className="truncate">{t.brand.name}</span>
+            <span className="sm:hidden">Learn TG</span>
+            <span className="hidden sm:inline">{t.brand.name}</span>
           </Link>
 
           {/* Desktop Navigation */}

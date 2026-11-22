@@ -67,6 +67,7 @@ import {
   type NotificationItem,
   type PdfBrandingConfig,
   type QuestionItem,
+  type QuestionLanguage,
   type SiteCommunityConfig,
   type StudyMaterialItem,
   type TestDefinition,
@@ -74,6 +75,7 @@ import {
 } from '../data/demoData';
 import { uploadMaterialPdf } from '../firebase';
 import { LANGUAGE_OPTIONS, type LanguageCode } from '../i18n';
+import { formatFirebaseAuthError, isInAppBrowser, isValidEmailFormat } from '../utils/authHelpers';
 import { parseBulkMcqs, SAMPLE_BULK_MCQ_TEXT } from '../utils/mcqParser';
 import { exportQuizToPdf, resizeImageFileToDataUrl } from '../utils/quizPdfExport';
 
@@ -142,7 +144,10 @@ export const AdminPage: React.FC = () => {
     authReady,
     firebaseUser,
     isAdmin,
+    isSuperAdmin,
     signInWithGoogle,
+    signInWithEmail,
+    resetPassword,
     signOutUser,
     toggleTheme,
     setLanguage,
@@ -182,6 +187,13 @@ export const AdminPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [authBusy, setAuthBusy] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPass, setAdminPass] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [adminAuthInfo, setAdminAuthInfo] = useState<string | null>(null);
+  const [syncConfirmModalOpen, setSyncConfirmModalOpen] = useState(false);
+  const [syncConfirmText, setSyncConfirmText] = useState('');
+  const [syncBusy, setSyncBusy] = useState(false);
   const [savingBusy, setSavingBusy] = useState(false);
   const [pdfUploading, setPdfUploading] = useState(false);
   const [pdfUploadError, setPdfUploadError] = useState<string | null>(null);
@@ -193,6 +205,21 @@ export const AdminPage: React.FC = () => {
   const [communityDraft, setCommunityDraft] = useState<SiteCommunityConfig>(state.communityConfig);
   const [communitySaving, setCommunitySaving] = useState(false);
   const [previewCommunityPopup, setPreviewCommunityPopup] = useState(false);
+
+  const inAppBrowser = isInAppBrowser();
+
+  useEffect(() => {
+    if (!authBusy) return;
+    let timer: number | undefined;
+    const handleFocus = () => {
+      timer = window.setTimeout(() => setAuthBusy(false), 1500);
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [authBusy]);
 
   useEffect(() => {
     setPdfDraft(state.pdfBranding);
@@ -207,6 +234,7 @@ export const AdminPage: React.FC = () => {
   const [qbModal, setQbModal] = useState<{ mode: 'add' | 'edit'; item: QuestionItem } | null>(null);
   const [bulkQbModal, setBulkQbModal] = useState<{
     subjectKey: 'gk' | 'cs';
+    language: QuestionLanguage;
     published: boolean;
     rawText: string;
     correctOverrides: Record<number, number>;
@@ -216,6 +244,7 @@ export const AdminPage: React.FC = () => {
     item: TestDefinition;
     tab: 'bulk' | 'bank';
     bulkSubjectKey: 'gk' | 'cs';
+    bulkLanguage: QuestionLanguage;
     bulkText: string;
     correctOverrides: Record<number, number>;
     bankSearch: string;
@@ -411,43 +440,155 @@ export const AdminPage: React.FC = () => {
 
   if (!firebaseUser) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4 dark:bg-[#0b1730]">
-        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 text-center shadow-lg dark:border-[#24385c] dark:bg-[#122443]">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#102544] text-[#facc15]">
-            <Lock className="h-7 w-7" />
+      <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4 py-8 dark:bg-[#0b1730]">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-lg dark:border-[#24385c] dark:bg-[#122443]">
+          <div className="text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#102544] text-[#facc15]">
+              <Lock className="h-7 w-7" />
+            </div>
+            <h1 className="font-display text-2xl font-extrabold text-slate-900 dark:text-white">
+              Admin Access Restricted
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-[#9fb0c8]">
+              Sign in with an administrator account to manage quizzes, study materials, and site settings.
+            </p>
           </div>
-          <h1 className="font-display text-2xl font-extrabold text-slate-900 dark:text-white">
-            Admin Access Restricted
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-[#9fb0c8]">
-            This Admin Panel is locked. Sign in with the authorized administrator Google account to manage quizzes, PDF study materials, and site content.
-          </p>
+
+          {inAppBrowser && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-left text-xs font-medium text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                Open this page in Chrome or Safari to use Google login, or log in with email.
+              </span>
+            </div>
+          )}
+
+          {adminAuthError && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-left text-xs font-medium text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{adminAuthError}</span>
+            </div>
+          )}
+
+          {adminAuthInfo && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-left text-xs font-medium text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <Check className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{adminAuthInfo}</span>
+            </div>
+          )}
 
           <button
             type="button"
             disabled={authBusy}
             onClick={async () => {
+              setAdminAuthError(null);
+              setAdminAuthInfo(null);
               setAuthBusy(true);
               try {
                 await signInWithGoogle();
               } catch (err) {
-                showToast(err instanceof Error ? err.message : 'Sign-in cancelled.');
+                setAdminAuthError(formatFirebaseAuthError(err));
               } finally {
                 setAuthBusy(false);
               }
             }}
-            className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#102544] px-5 text-sm font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-60 dark:bg-[#facc15] dark:text-[#102544]"
+            className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-bold text-[#102544] hover:bg-slate-50 disabled:opacity-60 dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
           >
             <LogIn className="h-4 w-4" />
             <span>{authBusy ? 'Signing in…' : 'Sign in with Google'}</span>
           </button>
 
-          <Link
-            to="/"
-            className="mt-4 inline-block text-sm font-semibold text-slate-600 hover:underline dark:text-[#9fb0c8]"
+          <form
+            noValidate
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setAdminAuthError(null);
+              setAdminAuthInfo(null);
+              if (!isValidEmailFormat(adminEmail)) {
+                setAdminAuthError('Please enter a valid email address.');
+                return;
+              }
+              if (adminPass.length < 6) {
+                setAdminAuthError('Password must be at least 6 characters.');
+                return;
+              }
+              setAuthBusy(true);
+              try {
+                await signInWithEmail(adminEmail, adminPass);
+              } catch (err) {
+                setAdminAuthError(formatFirebaseAuthError(err));
+              } finally {
+                setAuthBusy(false);
+              }
+            }}
+            className="mt-4 space-y-3 border-t border-slate-200 pt-4 text-left dark:border-[#24385c]"
           >
-            ← Back to Website
-          </Link>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Admin Email
+              </label>
+              <input
+                type="email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="admin@example.com"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setAdminAuthError(null);
+                    setAdminAuthInfo(null);
+                    if (!isValidEmailFormat(adminEmail)) {
+                      setAdminAuthError('Enter your email above first to send a reset link.');
+                      return;
+                    }
+                    setAuthBusy(true);
+                    try {
+                      await resetPassword(adminEmail);
+                      setAdminAuthInfo(`Password reset link sent to ${adminEmail.trim()}.`);
+                    } catch (err) {
+                      setAdminAuthError(formatFirebaseAuthError(err));
+                    } finally {
+                      setAuthBusy(false);
+                    }
+                  }}
+                  className="text-xs font-semibold text-[#102544] hover:underline dark:text-[#facc15]"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <input
+                type="password"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                placeholder="Enter password"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={authBusy}
+              className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-60 dark:bg-[#facc15] dark:text-[#102544]"
+            >
+              {authBusy ? 'Signing in…' : 'Sign in with Email'}
+            </button>
+          </form>
+
+          <div className="mt-4 text-center">
+            <Link
+              to="/"
+              className="inline-block text-sm font-semibold text-slate-600 hover:underline dark:text-[#9fb0c8]"
+            >
+              ← Back to Website
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -693,7 +834,7 @@ export const AdminPage: React.FC = () => {
             </button>
             <div>
               <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                Firebase Connected · {firebaseUser.email}
+                Firebase Connected · {firebaseUser.email} ({isSuperAdmin ? 'Super Admin' : 'Admin'})
               </div>
               <h1 className="font-display text-lg font-extrabold text-slate-900 dark:text-white">
                 {t.admin.sections[section]}
@@ -702,14 +843,6 @@ export const AdminPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void seedFirestoreCatalog(false)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
-            >
-              <Database className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">Sync Starter Data</span>
-            </button>
 
             <div className="relative flex items-center">
               <Globe className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-500 dark:text-[#9fb0c8]" />
@@ -862,6 +995,7 @@ export const AdminPage: React.FC = () => {
                       <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
                         <tr>
                           <th className="px-4 py-3">Display Name</th>
+                          <th className="px-4 py-3">Role</th>
                           <th className="px-4 py-3">Target Exam</th>
                           <th className="px-4 py-3">Points</th>
                           <th className="px-4 py-3">{t.common.status}</th>
@@ -870,8 +1004,28 @@ export const AdminPage: React.FC = () => {
                       <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
                         {slice.map((row) => (
                           <tr key={row.id}>
-                            <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                              {String(row.name || row.id)}
+                            <td className="px-4 py-3">
+                              <div className="font-semibold text-slate-900 dark:text-white">
+                                {String(row.name || row.id)}
+                              </div>
+                              {row.email && (
+                                <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                  {String(row.email)}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold uppercase ${
+                                  row.role === 'super_admin'
+                                    ? 'bg-[#facc15]/25 text-[#102544] dark:text-[#facc15]'
+                                    : row.role === 'admin'
+                                      ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
+                                }`}
+                              >
+                                {String(row.role || 'student')}
+                              </span>
                             </td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
                               {String(row.exam || 'SSC')}
@@ -921,6 +1075,7 @@ export const AdminPage: React.FC = () => {
                       onClick={() =>
                         setBulkQbModal({
                           subjectKey: 'gk',
+                          language: 'English',
                           published: true,
                           rawText: '',
                           correctOverrides: {},
@@ -940,6 +1095,7 @@ export const AdminPage: React.FC = () => {
                             id: `q_${Date.now()}`,
                             subjectKey: 'gk',
                             subjectName: 'General Knowledge',
+                            language: 'English',
                             question: '',
                             options: ['', '', '', ''],
                             correctIndex: 0,
@@ -964,7 +1120,7 @@ export const AdminPage: React.FC = () => {
                       <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
                         <tr>
                           <th className="px-4 py-3">Question</th>
-                          <th className="px-4 py-3">Subject</th>
+                          <th className="px-4 py-3">Subject &amp; Lang</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -976,7 +1132,10 @@ export const AdminPage: React.FC = () => {
                               {q.question}
                             </td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
-                              {q.subjectName}
+                              <div>{q.subjectName}</div>
+                              <span className="mt-0.5 inline-block rounded bg-[#eef2f8] px-1.5 py-0.5 text-[10px] font-bold text-[#102544] dark:bg-[#16294b] dark:text-[#facc15]">
+                                {q.language || 'English'}
+                              </span>
                             </td>
                             <td className="px-4 py-3">
                               <button
@@ -993,7 +1152,12 @@ export const AdminPage: React.FC = () => {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
-                                onEdit={() => setQbModal({ mode: 'edit', item: { ...q } })}
+                                onEdit={() =>
+                                  setQbModal({
+                                    mode: 'edit',
+                                    item: { ...q, language: q.language || 'English' },
+                                  })
+                                }
                                 onDelete={() => setDeleteTarget({ kind: 'qb', id: q.id, label: q.question })}
                               />
                             </td>
@@ -1027,16 +1191,19 @@ export const AdminPage: React.FC = () => {
                           id: `tst_${Date.now()}`,
                           type: defaultType,
                           name: '',
-                          subjectKeys: ['gk'],
+                          subjectKeys: section === 'quizzes' ? ['gk', 'cs'] : ['gk'],
                           examIds: [],
                           questionIds: [],
-                          minutes: section === 'quizzes' ? 5 : 15,
+                          questionCount: section === 'quizzes' ? 10 : 50,
+                          minutes: section === 'quizzes' ? 5 : 40,
                           negativeMarking: section === 'quizzes' ? 0 : 0.25,
+                          shuffle: section === 'quizzes',
                           note: '',
                           published: true,
                         },
                         tab: 'bulk',
                         bulkSubjectKey: 'gk',
+                        bulkLanguage: 'English',
                         bulkText: '',
                         correctOverrides: {},
                         bankSearch: '',
@@ -1066,12 +1233,9 @@ export const AdminPage: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
                         {slice.map((tst) => {
-                          const qCount =
-                            tst.questionIds && tst.questionIds.length > 0
-                              ? tst.questionIds.length
-                              : state.questions.filter(
-                                  (q) => q.published && tst.subjectKeys.includes(q.subjectKey)
-                                ).length;
+                          const defaultCount =
+                            tst.type === 'Daily Quiz' ? 10 : tst.type === 'Mock Test' ? 50 : 20;
+                          const qCount = tst.questionCount ?? tst.questionLimit ?? defaultCount;
                           const assignedExams = (tst.examIds || [])
                             .map((eid) => EXAM_CATEGORIES.find((ex) => ex.id === eid)?.name || eid.toUpperCase());
                           return (
@@ -1102,7 +1266,7 @@ export const AdminPage: React.FC = () => {
                                 {tst.minutes} min
                               </td>
                               <td className="px-4 py-3 font-mono-num text-slate-600 dark:text-[#9fb0c8]">
-                                {qCount} {tst.questionIds?.length ? '(Curated)' : '(By subject)'}
+                                {qCount} Qs{tst.shuffle ? ' · Random' : ''}
                               </td>
                               <td className="px-4 py-3">
                                 <button
@@ -1137,9 +1301,15 @@ export const AdminPage: React.FC = () => {
                                     onEdit={() =>
                                       setTestModal({
                                         mode: 'edit',
-                                        item: { ...tst, examIds: tst.examIds || [] },
+                                        item: {
+                                          ...tst,
+                                          examIds: tst.examIds || [],
+                                          questionCount: qCount,
+                                          shuffle: Boolean(tst.shuffle),
+                                        },
                                         tab: 'bulk',
                                         bulkSubjectKey: tst.subjectKeys[0] || 'gk',
+                                        bulkLanguage: 'English',
                                         bulkText: '',
                                         correctOverrides: {},
                                         bankSearch: '',
@@ -2740,6 +2910,36 @@ export const AdminPage: React.FC = () => {
                   </div>
                 )}
 
+                {section === 'sitesettings' && isSuperAdmin && (
+                  <div className="rounded-2xl border border-amber-300 bg-amber-50/70 p-5 shadow-sm dark:border-amber-700/50 dark:bg-amber-950/20">
+                    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                          <Database className="h-3.5 w-3.5" />
+                          <span>Super Admin Only</span>
+                        </div>
+                        <h3 className="mt-1 font-display text-lg font-bold text-slate-900 dark:text-white">
+                          Sync Starter Data to Firestore
+                        </h3>
+                        <p className="mt-0.5 text-xs text-slate-600 dark:text-[#9fb0c8]">
+                          Resets and writes starter questions, default quizzes/mock tests, courses, and catalog rows to Firestore. Existing items with matching IDs will be overwritten.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSyncConfirmText('');
+                          setSyncConfirmModalOpen(true);
+                        }}
+                        className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"
+                      >
+                        <Database className="h-4 w-4" />
+                        <span>Sync Starter Data</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
                   <button
@@ -2977,26 +3177,48 @@ export const AdminPage: React.FC = () => {
             }}
             className="space-y-3"
           >
-            <div>
-              <label className="mb-1 block text-xs font-semibold">Subject</label>
-              <select
-                value={qbModal.item.subjectKey}
-                onChange={(e) => {
-                  const key = e.target.value as 'gk' | 'cs';
-                  setQbModal({
-                    ...qbModal,
-                    item: {
-                      ...qbModal.item,
-                      subjectKey: key,
-                      subjectName: key === 'gk' ? 'General Knowledge' : 'Computer Knowledge',
-                    },
-                  });
-                }}
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-              >
-                <option value="gk">General Knowledge</option>
-                <option value="cs">Computer Knowledge</option>
-              </select>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-semibold">Subject</label>
+                <select
+                  value={qbModal.item.subjectKey}
+                  onChange={(e) => {
+                    const key = e.target.value as 'gk' | 'cs';
+                    setQbModal({
+                      ...qbModal,
+                      item: {
+                        ...qbModal.item,
+                        subjectKey: key,
+                        subjectName: key === 'gk' ? 'General Knowledge' : 'Computer Knowledge',
+                      },
+                    });
+                  }}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                >
+                  <option value="gk">General Knowledge</option>
+                  <option value="cs">Computer Knowledge</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold">Language</label>
+                <select
+                  value={qbModal.item.language || 'English'}
+                  onChange={(e) =>
+                    setQbModal({
+                      ...qbModal,
+                      item: {
+                        ...qbModal.item,
+                        language: e.target.value as QuestionLanguage,
+                      },
+                    })
+                  }
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                >
+                  <option value="English">English</option>
+                  <option value="Bengali">Bengali</option>
+                  <option value="Hindi">Hindi</option>
+                </select>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold">Question</label>
@@ -3120,6 +3342,7 @@ export const AdminPage: React.FC = () => {
                   id: `q_${now}_${idx}`,
                   subjectKey: bulkQbModal.subjectKey,
                   subjectName,
+                  language: bulkQbModal.language,
                   question: item.question,
                   options: item.options,
                   correctIndex:
@@ -3156,6 +3379,25 @@ export const AdminPage: React.FC = () => {
                   >
                     <option value="gk">General Knowledge</option>
                     <option value="cs">Computer Knowledge</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-[#9fb0c8]">
+                    Language
+                  </label>
+                  <select
+                    value={bulkQbModal.language}
+                    onChange={(e) =>
+                      setBulkQbModal({
+                        ...bulkQbModal,
+                        language: e.target.value as QuestionLanguage,
+                      })
+                    }
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
+                  >
+                    <option value="English">English</option>
+                    <option value="Bengali">Bengali</option>
+                    <option value="Hindi">Hindi</option>
                   </select>
                 </div>
                 <label className="mt-4 flex items-center gap-2 text-sm font-medium">
@@ -3261,6 +3503,7 @@ export const AdminPage: React.FC = () => {
                     id: `q_${now}_${idx}`,
                     subjectKey: testModal.bulkSubjectKey,
                     subjectName,
+                    language: testModal.bulkLanguage,
                     question: item.question,
                     options: item.options,
                     correctIndex:
@@ -3302,7 +3545,7 @@ export const AdminPage: React.FC = () => {
           >
             {/* Top Test Configuration Grid */}
             <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5 sm:grid-cols-12 dark:border-[#24385c] dark:bg-[#16294b]">
-              <div className="sm:col-span-5">
+              <div className="sm:col-span-4">
                 <label className="mb-1 block text-xs font-semibold">Test Title</label>
                 <input
                   type="text"
@@ -3320,15 +3563,37 @@ export const AdminPage: React.FC = () => {
                 <label className="mb-1 block text-xs font-semibold">Target Section (Quiz / Mock)</label>
                 <select
                   value={testModal.item.type}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextType = e.target.value as TestDefinition['type'];
                     setTestModal({
                       ...testModal,
                       item: {
                         ...testModal.item,
-                        type: e.target.value as TestDefinition['type'],
+                        type: nextType,
+                        ...(testModal.mode === 'add'
+                          ? nextType === 'Daily Quiz'
+                            ? {
+                                questionCount: 10,
+                                minutes: 5,
+                                negativeMarking: 0,
+                                shuffle: true,
+                              }
+                            : nextType === 'Mock Test'
+                              ? {
+                                  questionCount: 50,
+                                  minutes: 40,
+                                  negativeMarking: 0.25,
+                                  shuffle: false,
+                                }
+                              : {
+                                  questionCount: 20,
+                                  minutes: 15,
+                                  negativeMarking: 0.25,
+                                }
+                          : {}),
                       },
-                    })
-                  }
+                    });
+                  }}
                   className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs sm:text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
                 >
                   <option value="Daily Quiz">Daily Quiz (Quizzes Section)</option>
@@ -3339,7 +3604,30 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-semibold">Minutes</label>
+                <label className="mb-1 block text-xs font-semibold">Questions</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={
+                    testModal.item.questionCount ??
+                    (testModal.item.type === 'Daily Quiz' ? 10 : 50)
+                  }
+                  onChange={(e) =>
+                    setTestModal({
+                      ...testModal,
+                      item: {
+                        ...testModal.item,
+                        questionCount: Math.max(1, Math.min(500, Number(e.target.value) || 10)),
+                      },
+                    })
+                  }
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
+                />
+              </div>
+
+              <div className="sm:col-span-1">
+                <label className="mb-1 block text-xs font-semibold">Min</label>
                 <input
                   type="number"
                   min={1}
@@ -3351,7 +3639,7 @@ export const AdminPage: React.FC = () => {
                       item: { ...testModal.item, minutes: Number(e.target.value) || 5 },
                     })
                   }
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
                 />
               </div>
 
@@ -3426,9 +3714,9 @@ export const AdminPage: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-12">
-                <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm">
+                <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
                   <span className="font-semibold text-slate-600 dark:text-[#9fb0c8]">
-                    Bulk MCQ Subject:
+                    Bulk MCQ:
                   </span>
                   <select
                     value={testModal.bulkSubjectKey}
@@ -3444,7 +3732,38 @@ export const AdminPage: React.FC = () => {
                     <option value="cs">Computer Knowledge</option>
                   </select>
 
-                  <label className="flex items-center gap-2 font-medium">
+                  <select
+                    aria-label="Bulk MCQ Language"
+                    value={testModal.bulkLanguage}
+                    onChange={(e) =>
+                      setTestModal({
+                        ...testModal,
+                        bulkLanguage: e.target.value as QuestionLanguage,
+                      })
+                    }
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
+                  >
+                    <option value="English">English</option>
+                    <option value="Bengali">Bengali</option>
+                    <option value="Hindi">Hindi</option>
+                  </select>
+
+                  <label className="flex items-center gap-1.5 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(testModal.item.shuffle)}
+                      onChange={(e) =>
+                        setTestModal({
+                          ...testModal,
+                          item: { ...testModal.item, shuffle: e.target.checked },
+                        })
+                      }
+                      className="h-4 w-4 accent-[#102544]"
+                    />
+                    <span>Random / Shuffle</span>
+                  </label>
+
+                  <label className="flex items-center gap-1.5 font-medium">
                     <input
                       type="checkbox"
                       checked={testModal.item.published !== false}
@@ -4515,6 +4834,69 @@ export const AdminPage: React.FC = () => {
               </button>
             </div>
           </form>
+        </ModalShell>
+      )}
+
+      {/* Super Admin Starter Data Sync Confirmation Modal */}
+      {syncConfirmModalOpen && isSuperAdmin && (
+        <ModalShell
+          title="Confirm Sync Starter Data"
+          onClose={() => {
+            if (!syncBusy) setSyncConfirmModalOpen(false);
+          }}
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                This will write starter questions, default tests, courses, and settings into Firestore and overwrite starter document IDs. Type <strong>SYNC</strong> below to confirm.
+              </span>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Type <code>SYNC</code> to continue
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={syncConfirmText}
+                onChange={(e) => setSyncConfirmText(e.target.value)}
+                placeholder="SYNC"
+                className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono-num text-sm font-bold uppercase dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={syncBusy}
+                onClick={() => setSyncConfirmModalOpen(false)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold dark:border-[#24385c]"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={syncConfirmText.trim() !== 'SYNC' || syncBusy}
+                onClick={async () => {
+                  setSyncBusy(true);
+                  try {
+                    await seedFirestoreCatalog(false);
+                    setSyncConfirmModalOpen(false);
+                    setSyncConfirmText('');
+                  } catch (err) {
+                    showToast(err instanceof Error ? err.message : 'Starter data sync failed.');
+                  } finally {
+                    setSyncBusy(false);
+                  }
+                }}
+                className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {syncBusy ? 'Syncing…' : 'Confirm SYNC'}
+              </button>
+            </div>
+          </div>
         </ModalShell>
       )}
 

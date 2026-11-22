@@ -177,7 +177,7 @@ export const en = {
       'The timer starts when you press Start test. The test submits automatically when time expires.',
       'Click an option to record your answer. Use Clear response to remove your selection.',
       'Use Mark for review to flag any question you want to revisit before submitting.',
-      'Use the question palette on the right to jump directly to any question.',
+      'Use the question palette on the side (or tap the Palette button below on mobile) to jump directly to any question.',
     ],
     ruleNeg: 'Each wrong answer deducts {neg} marks.',
     ruleNoNeg: 'There is no negative marking for wrong answers.',

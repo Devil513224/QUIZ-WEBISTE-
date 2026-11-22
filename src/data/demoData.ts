@@ -16,6 +16,8 @@ export interface SubjectSyllabus {
   topics: string[];
 }
 
+export type QuestionLanguage = 'English' | 'Bengali' | 'Hindi';
+
 export interface QuestionItem {
   id: string;
   subjectKey: 'gk' | 'cs';
@@ -24,6 +26,7 @@ export interface QuestionItem {
   options: string[];
   correctIndex: number;
   explanation: string;
+  language?: QuestionLanguage;
   published: boolean;
 }
 
@@ -34,6 +37,7 @@ export interface TestDefinition {
   subjectKeys: Array<'gk' | 'cs'>;
   examIds?: string[];
   questionIds?: string[];
+  questionCount?: number;
   minutes: number;
   negativeMarking: number;
   note?: string;
@@ -355,6 +359,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Howrah', 'Kolkata', 'Siliguri', 'Durgapur'],
     correctIndex: 1,
     explanation: 'Kolkata has been the capital of West Bengal since 1947.',
+    language: 'English',
     published: true,
   },
   {
@@ -370,6 +375,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     ],
     correctIndex: 0,
     explanation: 'Rabindranath Tagore received the 1913 Nobel Prize in Literature for Gitanjali.',
+    language: 'English',
     published: true,
   },
   {
@@ -380,6 +386,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Yamuna', 'Godavari', 'Ganga', 'Brahmaputra'],
     correctIndex: 2,
     explanation: 'The Ganga is the longest river flowing primarily within India.',
+    language: 'English',
     published: true,
   },
   {
@@ -395,6 +402,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     ],
     correctIndex: 1,
     explanation: 'Article 21 guarantees the protection of life and personal liberty.',
+    language: 'English',
     published: true,
   },
   {
@@ -405,6 +413,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Sardar Patel', 'Rajendra Prasad', 'Jawaharlal Nehru', 'Lal Bahadur Shastri'],
     correctIndex: 2,
     explanation: 'Jawaharlal Nehru took office on 15 August 1947.',
+    language: 'English',
     published: true,
   },
   {
@@ -420,6 +429,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     ],
     correctIndex: 0,
     explanation: 'The CPU (Central Processing Unit) executes program instructions.',
+    language: 'English',
     published: true,
   },
   {
@@ -430,6 +440,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Keyboard', 'Scanner', 'Mouse', 'Monitor'],
     correctIndex: 3,
     explanation: 'A monitor displays visual output; keyboard, scanner and mouse are input devices.',
+    language: 'English',
     published: true,
   },
   {
@@ -440,6 +451,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['4', '8', '16', '32'],
     correctIndex: 1,
     explanation: 'One byte equals 8 bits.',
+    language: 'English',
     published: true,
   },
   {
@@ -450,6 +462,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Ctrl + V', 'Ctrl + X', 'Ctrl + C', 'Ctrl + Z'],
     correctIndex: 2,
     explanation: 'Ctrl + C copies, Ctrl + V pastes, Ctrl + X cuts, and Ctrl + Z undoes.',
+    language: 'English',
     published: true,
   },
   {
@@ -460,6 +473,7 @@ export const INITIAL_QUESTIONS: QuestionItem[] = [
     options: ['Volatile', 'Permanent', 'Read-only', 'Optical'],
     correctIndex: 0,
     explanation: 'RAM is volatile memory because it loses its contents when power turns off.',
+    language: 'English',
     published: true,
   },
 ];
@@ -469,10 +483,12 @@ export const INITIAL_TESTS: TestDefinition[] = [
     id: 'dq',
     type: 'Daily Quiz',
     name: 'Daily GK Quiz',
-    subjectKeys: ['gk'],
+    subjectKeys: ['gk', 'cs'],
     examIds: ['ssc', 'wb', 'railway'],
+    questionCount: 10,
     minutes: 5,
     negativeMarking: 0,
+    shuffle: true,
     published: true,
   },
   {
@@ -481,8 +497,10 @@ export const INITIAL_TESTS: TestDefinition[] = [
     name: 'Free Mock Test 1: GK & Computer',
     subjectKeys: ['gk', 'cs'],
     examIds: ['ssc', 'railway', 'wb', 'computer'],
-    minutes: 10,
+    questionCount: 50,
+    minutes: 40,
     negativeMarking: 0.25,
+    shuffle: false,
     published: true,
   },
   {
@@ -491,7 +509,8 @@ export const INITIAL_TESTS: TestDefinition[] = [
     name: 'General Knowledge Sectional',
     subjectKeys: ['gk'],
     examIds: ['upsc', 'state-psc', 'wb'],
-    minutes: 5,
+    questionCount: 20,
+    minutes: 15,
     negativeMarking: 0.25,
     published: true,
   },
@@ -501,7 +520,8 @@ export const INITIAL_TESTS: TestDefinition[] = [
     name: 'Computer Knowledge Sectional',
     subjectKeys: ['cs'],
     examIds: ['computer', 'banking', 'ssc'],
-    minutes: 5,
+    questionCount: 20,
+    minutes: 15,
     negativeMarking: 0.25,
     published: true,
   },
@@ -511,7 +531,8 @@ export const INITIAL_TESTS: TestDefinition[] = [
     name: 'Sample Paper in Previous-Year Format',
     subjectKeys: ['gk', 'cs'],
     examIds: ['ssc', 'wb', 'police'],
-    minutes: 10,
+    questionCount: 50,
+    minutes: 40,
     negativeMarking: 0.25,
     note: 'Sample paper in previous-year format (Demo only).',
     published: true,
