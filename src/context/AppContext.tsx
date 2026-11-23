@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type User,
   createUserWithEmailAndPassword,
@@ -15,6 +15,7 @@ import {
   doc,
   getCountFromServer,
   getDoc,
+  limit,
   onSnapshot,
   query,
   serverTimestamp,
@@ -109,6 +110,13 @@ export interface GenericRow {
 }
 
 export type AdminActionHint = 'create' | 'update' | 'publish' | 'unpublish';
+
+export interface LiveVisitorItem {
+  id: string;
+  path: string;
+  signedIn: boolean;
+  lastSeenMs: number;
+}
 
 export interface DashboardCollectionStat {
   key: string;
@@ -368,6 +376,10 @@ interface AppContextValue {
     displayLabel?: string
   ) => Promise<void>;
   fetchDashboardCounts: () => Promise<DashboardCountsData>;
+  liveVisitors: LiveVisitorItem[];
+  liveVisitorCount: number;
+  liveVisitorsRulePending: boolean;
+  reportVisitorPath: (pathname: string) => void;
   seedFirestoreCatalog: (silent?: boolean) => Promise<void>;
   resetDemoState: () => void;
 }
@@ -490,6 +502,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [userRole, setUserRole] = useState<UserRole>('student');
   const isSuperAdmin = userRole === 'super_admin';
   const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  const [rawLiveVisitors, setRawLiveVisitors] = useState<LiveVisitorItem[]>([]);
+  const [liveVisitorTick, setLiveVisitorTick] = useState<number>(() => Date.now());
+  const [liveVisitorsRulePending, setLiveVisitorsRulePending] = useState(false);
+  const visitorIdRef = useRef<string>('');
+  const visitorPathRef = useRef<string>(
+    typeof window !== 'undefined' ? (window.location.pathname || '/').slice(0, 120) : '/'
+  );
+
+  const getVisitorId = useCallback(() => {
+    if (visitorIdRef.current) return visitorIdRef.current;
+    let id = '';
+    try {
+      const existing = sessionStorage.getItem('tg_live_visitor_id');
+      if (existing && /^[a-zA-Z0-9_-]{8,64}$/.test(existing)) {
+        id = existing;
+      } else {
+        id = `vis_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem('tg_live_visitor_id', id);
+      }
+    } catch {
+      id = `vis_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+    visitorIdRef.current = id;
+    return id;
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -1352,6 +1389,138 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubs.forEach((fn) => fn());
     };
   }, [authReady, isAdmin, isSuperAdmin]);
+
+  // Live Visitor Heartbeat + Real-time Online Count Subscription
+  const sendVisitorHeartbeat = useCallback(
+    async (active = true) => {
+      if (!authReady || !isFirebaseConfigured || !db) return;
+      const visitorId = getVisitorId();
+      const safePath = (visitorPathRef.current || '/').slice(0, 120) || '/';
+      try {
+        await setDoc(doc(db, 'liveVisitors', visitorId), {
+          id: visitorId,
+          path: safePath,
+          signedIn: Boolean(firebaseUser),
+          active,
+          lastSeen: serverTimestamp(),
+        });
+        setLiveVisitorsRulePending(false);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Missing or insufficient permissions') || msg.includes('permission-denied')) {
+          setLiveVisitorsRulePending(true);
+        }
+      }
+    },
+    [authReady, firebaseUser, getVisitorId]
+  );
+
+  const reportVisitorPath = useCallback(
+    (pathname: string) => {
+      const normalized = (pathname || '/').trim().slice(0, 120) || '/';
+      if (visitorPathRef.current === normalized) return;
+      visitorPathRef.current = normalized;
+      void sendVisitorHeartbeat(true);
+    },
+    [sendVisitorHeartbeat]
+  );
+
+  useEffect(() => {
+    if (!authReady || !isFirebaseConfigured || !db) return;
+    void sendVisitorHeartbeat(true);
+
+    const heartbeatTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void sendVisitorHeartbeat(true);
+      }
+    }, 45_000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void sendVisitorHeartbeat(true);
+      }
+    };
+
+    const handlePageHide = () => {
+      void sendVisitorHeartbeat(false);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.clearInterval(heartbeatTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [authReady, sendVisitorHeartbeat]);
+
+  useEffect(() => {
+    if (!authReady || !isFirebaseConfigured || !db) return;
+    const activeQuery = query(
+      collection(db, 'liveVisitors'),
+      where('active', '==', true),
+      limit(500)
+    );
+    const unsub = onSnapshot(
+      activeQuery,
+      (snap) => {
+        setLiveVisitorsRulePending(false);
+        const now = Date.now();
+        const items: LiveVisitorItem[] = [];
+        const staleIds: string[] = [];
+
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          const ts = extractTimestampInfo(data.lastSeen);
+          if (ts.ms > 0 && ts.ms < now - 5 * 60 * 1000) {
+            staleIds.push(d.id);
+          }
+          items.push({
+            id: d.id,
+            path: String(data.path || '/'),
+            signedIn: Boolean(data.signedIn),
+            lastSeenMs: ts.ms,
+          });
+        });
+
+        setRawLiveVisitors(items);
+        setLiveVisitorTick(now);
+
+        if (isAdmin && staleIds.length > 0) {
+          staleIds.slice(0, 20).forEach((id) => {
+            void deleteDoc(doc(db, 'liveVisitors', id)).catch(() => {});
+          });
+        }
+      },
+      (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Missing or insufficient permissions') || msg.includes('permission-denied')) {
+          setLiveVisitorsRulePending(true);
+        }
+      }
+    );
+
+    const expireTimer = window.setInterval(() => {
+      setLiveVisitorTick(Date.now());
+    }, 15_000);
+
+    return () => {
+      unsub();
+      window.clearInterval(expireTimer);
+    };
+  }, [authReady, isAdmin]);
+
+  const liveVisitors = useMemo(() => {
+    const cutoff = liveVisitorTick - 120_000;
+    return rawLiveVisitors
+      .filter((v) => v.lastSeenMs === 0 || v.lastSeenMs >= cutoff)
+      .sort((a, b) => b.lastSeenMs - a.lastSeenMs);
+  }, [rawLiveVisitors, liveVisitorTick]);
+
+  const liveVisitorCount = useMemo(() => {
+    if (!isFirebaseConfigured || !db || liveVisitorsRulePending) return 1;
+    return Math.max(1, liveVisitors.length);
+  }, [liveVisitors.length, liveVisitorsRulePending]);
 
   // Persist user progress to Firestore when signed in
   const persistProgressToFirestore = useCallback(async (nextState: PersistedState) => {
@@ -2552,6 +2721,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleStudentStatusDoc,
         updateUserRoleDoc,
         fetchDashboardCounts,
+        liveVisitors,
+        liveVisitorCount,
+        liveVisitorsRulePending,
+        reportVisitorPath,
         seedFirestoreCatalog,
         resetDemoState,
       }}

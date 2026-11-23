@@ -212,6 +212,9 @@ export const AdminPage: React.FC = () => {
     toggleStudentStatusDoc,
     updateUserRoleDoc,
     fetchDashboardCounts,
+    liveVisitors,
+    liveVisitorCount,
+    liveVisitorsRulePending,
     seedFirestoreCatalog,
     savePdfBrandingDoc,
     saveCommunityConfigDoc,
@@ -1414,7 +1417,61 @@ export const AdminPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Step 2: Live Numbers */}
+              {/* Step 2: Live Visitors & Numbers */}
+              {(() => {
+                const signedInCount = liveVisitors.filter((v) => v.signedIn).length;
+                const guestCount = Math.max(0, liveVisitors.length - signedInCount);
+                const pageCounts = liveVisitors.reduce<Record<string, number>>((acc, v) => {
+                  const key = v.path || '/';
+                  acc[key] = (acc[key] || 0) + 1;
+                  return acc;
+                }, {});
+                const topPages = Object.entries(pageCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 4);
+
+                return (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse"
+                          aria-hidden="true"
+                        />
+                        <div>
+                          <div className="text-xs font-medium text-slate-500 dark:text-[#9fb0c8]">
+                            Live Visitors Right Now (last 2 min)
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-baseline gap-2.5">
+                            <span className="font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
+                              {liveVisitorCount}
+                            </span>
+                            <span className="font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {liveVisitorsRulePending
+                                ? 'Firestore liveVisitors rule pending (showing local tab)'
+                                : `${signedInCount} signed-in · ${guestCount} guests`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {!liveVisitorsRulePending && topPages.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-[#9fb0c8]">
+                          <span className="font-semibold text-slate-500 dark:text-slate-400">
+                            Active pages:
+                          </span>
+                          {topPages.map(([routePath, count]) => (
+                            <span key={routePath} className="font-mono-num">
+                              {routePath} ({count})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <button
                   type="button"

@@ -367,6 +367,17 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidLiveVisitor(data) {
+      return data.keys().hasAll(['id', 'path', 'signedIn', 'active', 'lastSeen'])
+        && data.keys().hasOnly(['id', 'path', 'signedIn', 'active', 'lastSeen'])
+        && isValidId(data.id)
+        && data.id.size() >= 8 && data.id.size() <= 64
+        && data.path is string && data.path.size() >= 1 && data.path.size() <= 120
+        && data.signedIn is bool
+        && data.active is bool
+        && data.lastSeen is timestamp;
+    }
+
     // Connection check document (get only)
     match /test/connection {
       allow get: if resource == null || resource.data.published == true || isAdmin() || isSignedIn();
@@ -625,6 +636,22 @@ service cloud.firestore {
           'popupHighlight', 'published', 'updatedAt'
         ]);
       allow delete: if isValidId(docId) && isSuperAdmin();
+    }
+
+    // Live Visitor Presence Heartbeats (no PII; server timestamp enforced)
+    match /liveVisitors/{visitorId} {
+      allow get: if isValidId(visitorId) && (existing().active == true || isAdmin());
+      allow list: if existing().active == true || isAdmin();
+      allow create: if isValidId(visitorId)
+        && isValidLiveVisitor(incoming())
+        && incoming().id == visitorId
+        && incoming().lastSeen == request.time;
+      allow update: if isValidId(visitorId)
+        && isValidLiveVisitor(incoming())
+        && incoming().id == existing().id
+        && incoming().lastSeen == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['path', 'signedIn', 'active', 'lastSeen']);
+      allow delete: if isValidId(visitorId) && isAdmin();
     }
   }
 }

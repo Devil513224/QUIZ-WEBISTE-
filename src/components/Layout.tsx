@@ -29,6 +29,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     unreadNotificationsCount,
     firebaseUser,
     isAdmin,
+    liveVisitorCount,
+    reportVisitorPath,
   } = useApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -39,6 +41,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const navigate = useNavigate();
 
   const isAdminRoute = location.pathname.startsWith('/admin');
+
+  useEffect(() => {
+    reportVisitorPath(location.pathname);
+  }, [location.pathname, reportVisitorPath]);
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -427,8 +433,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
           </div>
 
-          <div className="mt-10 border-t border-[#24385c] pt-6 text-xs text-slate-400">
-            {t.footer.copyright}
+          <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-[#24385c] pt-6 text-xs text-slate-400">
+            <span>{t.footer.copyright}</span>
+            <span className="inline-flex items-center gap-2 font-mono-num text-slate-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+              <span>{liveVisitorCount} live online</span>
+            </span>
           </div>
         </div>
       </footer>

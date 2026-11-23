@@ -345,6 +345,19 @@
         "published",
         "updatedAt"
       ]
+    },
+    "LiveVisitorSession": {
+      "title": "LiveVisitorSession",
+      "description": "Lightweight anonymous/session heartbeat document for real-time online visitor counting (no PII).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 8, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "path": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "signedIn": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "lastSeen": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "path", "signedIn", "active", "lastSeen"]
     }
   },
   "firestore": {
@@ -427,6 +440,10 @@
     "/siteCommunity/{docId}": {
       "schema": { "$ref": "#/entities/SiteCommunity" },
       "description": "Social media channel URLs and visit welcome popup configuration."
+    },
+    "/liveVisitors/{visitorId}": {
+      "schema": { "$ref": "#/entities/LiveVisitorSession" },
+      "description": "Active visitor session heartbeats for real-time online visitor count (no PII)."
     }
   }
 }

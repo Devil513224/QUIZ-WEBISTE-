@@ -6,7 +6,7 @@ import { DemoLabel, EmptyState } from '../components/CommonUI';
 import { EXAM_CATEGORIES, LEADERBOARD_DATA } from '../data/demoData';
 
 export const HomePage: React.FC = () => {
-  const { state, t } = useApp();
+  const { state, t, liveVisitorCount } = useApp();
   const [heroSelected, setHeroSelected] = useState<number | null>(null);
   const [heroSeconds, setHeroSeconds] = useState(3599);
   const [examSearch, setExamSearch] = useState('');
@@ -334,13 +334,28 @@ export const HomePage: React.FC = () => {
       {isSectionVisible('exams') && (
         <section id="exam-categories" className="py-14">
           <div className="mx-auto max-w-7xl px-4 sm:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="font-display text-2xl font-extrabold text-slate-900 sm:text-3xl dark:text-white">
                   {getSectionHeading('exams', t.home.exploreExamsTitle)}
                 </h2>
                 <p className="mt-1 text-sm text-slate-600 dark:text-[#9fb0c8]">{t.home.exploreExamsSub}</p>
               </div>
+
+              <div
+                aria-live="polite"
+                className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-2 dark:border-[#24385c] dark:bg-[#122443]"
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+                <span className="text-xs font-medium text-slate-600 dark:text-[#9fb0c8]">
+                  Live Visitors
+                </span>
+                <span className="font-mono-num text-base font-extrabold text-[#102544] dark:text-[#facc15]">
+                  {liveVisitorCount}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-[#9fb0c8]">online now</span>
+              </div>
+
               <Link
                 to="/exams"
                 className="border-b-2 border-[#facc15] pb-0.5 text-sm font-bold text-[#102544] dark:text-[#facc15]"
