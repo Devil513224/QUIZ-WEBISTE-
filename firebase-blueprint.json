@@ -418,7 +418,7 @@
     },
     "/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
-      "description": "Admin-only audit logs."
+      "description": "Append-only admin audit logs (created by admins with matching signed-in identity and server timestamp; readable only by Super Admin; never updated or deleted)."
     },
     "/siteBranding/{docId}": {
       "schema": { "$ref": "#/entities/SiteBranding" },

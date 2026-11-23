@@ -30,6 +30,7 @@ import {
   Moon,
   Newspaper,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   ShieldAlert,
@@ -47,12 +48,18 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { type GenericRow, useApp } from '../context/AppContext';
+import {
+  type DashboardCountsData,
+  type GenericRow,
+  type UserRole,
+  useApp,
+} from '../context/AppContext';
 import { EmptyState, LoadingState } from '../components/CommonUI';
 import { WelcomeNotificationPopup } from '../components/SocialCommunity';
 import {
@@ -125,17 +132,21 @@ const CATALOG_SCHEMA: Record<'exams' | 'subjects' | 'categories' | 'sitesettings
   ],
 };
 
-const WEEKLY_CHART_DATA = [
-  { day: 'Mon', attempts: 145 },
-  { day: 'Tue', attempts: 198 },
-  { day: 'Wed', attempts: 176 },
-  { day: 'Thu', attempts: 242 },
-  { day: 'Fri', attempts: 268 },
-  { day: 'Sat', attempts: 315 },
-  { day: 'Sun', attempts: 290 },
-];
+const PAGE_SIZE = 20;
 
-const PAGE_SIZE = 6;
+const CATALOG_ADD_LABELS: Record<'exams' | 'subjects' | 'categories' | 'sitesettings', string> = {
+  exams: 'Add Exam',
+  subjects: 'Add Subject',
+  categories: 'Add Category',
+  sitesettings: 'Add Setting',
+};
+
+const CATALOG_MODAL_LABELS: Record<'exams' | 'subjects' | 'categories' | 'sitesettings', { add: string; edit: string }> = {
+  exams: { add: 'Add Exam', edit: 'Edit Exam' },
+  subjects: { add: 'Add Subject', edit: 'Edit Subject' },
+  categories: { add: 'Add Category', edit: 'Edit Category' },
+  sitesettings: { add: 'Add Setting', edit: 'Edit Setting' },
+};
 
 export const AdminPage: React.FC = () => {
   const {
@@ -177,6 +188,8 @@ export const AdminPage: React.FC = () => {
     saveReportDoc,
     deleteReportDoc,
     toggleStudentStatusDoc,
+    updateUserRoleDoc,
+    fetchDashboardCounts,
     seedFirestoreCatalog,
     savePdfBrandingDoc,
     saveCommunityConfigDoc,
@@ -185,7 +198,11 @@ export const AdminPage: React.FC = () => {
   const [section, setSection] = useState<SectionKey>('dash');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [page, setPage] = useState(1);
+  const [dashboardCounts, setDashboardCounts] = useState<DashboardCountsData | null>(null);
+  const [countsLoading, setCountsLoading] = useState(false);
+  const [roleUpdatingUid, setRoleUpdatingUid] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPass, setAdminPass] = useState('');
@@ -229,8 +246,37 @@ export const AdminPage: React.FC = () => {
     setCommunityDraft(state.communityConfig);
   }, [state.communityConfig]);
 
+  useEffect(() => {
+    if (!isSuperAdmin && (section === 'sitesettings' || section === 'logs')) {
+      setSection('dash');
+      setSearchTerm('');
+      setStatusFilter('all');
+      setPage(1);
+    }
+  }, [isSuperAdmin, section]);
+
+  const loadDashboardCounts = async () => {
+    setCountsLoading(true);
+    try {
+      const counts = await fetchDashboardCounts();
+      setDashboardCounts(counts);
+    } finally {
+      setCountsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!authReady || !isAdmin || section !== 'dash') return;
+    void loadDashboardCounts();
+  }, [authReady, isAdmin, isSuperAdmin, section]);
+
   // Modals
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: string; id: string; label: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    kind: string;
+    id: string;
+    label: string;
+    isPublished?: boolean;
+  } | null>(null);
   const [qbModal, setQbModal] = useState<{ mode: 'add' | 'edit'; item: QuestionItem } | null>(null);
   const [bulkQbModal, setBulkQbModal] = useState<{
     subjectKey: 'gk' | 'cs';
@@ -336,98 +382,133 @@ export const AdminPage: React.FC = () => {
     [bulkQbModal?.rawText]
   );
 
+  const matchesStatus = (isPub: boolean) =>
+    statusFilter === 'all' ? true : statusFilter === 'published' ? isPub : !isPub;
+
   // Filtered lists — hooks must stay above early returns
   const qFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.questions.filter(
       (item) =>
-        !q ||
-        item.question.toLowerCase().includes(q) ||
-        item.subjectName.toLowerCase().includes(q)
+        matchesStatus(item.published) &&
+        (!q ||
+          item.question.toLowerCase().includes(q) ||
+          item.subjectName.toLowerCase().includes(q))
     );
-  }, [state.questions, searchTerm]);
+  }, [state.questions, searchTerm, statusFilter]);
 
   const quizFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.tests.filter(
       (tItem) =>
         tItem.type === 'Daily Quiz' &&
+        matchesStatus(tItem.published !== false) &&
         (!q || tItem.name.toLowerCase().includes(q))
     );
-  }, [state.tests, searchTerm]);
+  }, [state.tests, searchTerm, statusFilter]);
 
   const mockFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.tests.filter(
       (tItem) =>
         tItem.type !== 'Daily Quiz' &&
+        matchesStatus(tItem.published !== false) &&
         (!q || tItem.name.toLowerCase().includes(q) || tItem.type.toLowerCase().includes(q))
     );
-  }, [state.tests, searchTerm]);
+  }, [state.tests, searchTerm, statusFilter]);
 
   const matFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.materials.filter(
       (m) =>
-        !q || m.title.toLowerCase().includes(q) || m.subject.toLowerCase().includes(q)
+        matchesStatus(m.published) &&
+        (!q || m.title.toLowerCase().includes(q) || m.subject.toLowerCase().includes(q))
     );
-  }, [state.materials, searchTerm]);
+  }, [state.materials, searchTerm, statusFilter]);
 
   const courseFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.courses.filter(
       (c) =>
-        !q || c.title.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
+        matchesStatus(c.published) &&
+        (!q || c.title.toLowerCase().includes(q) || c.description.toLowerCase().includes(q))
     );
-  }, [state.courses, searchTerm]);
+  }, [state.courses, searchTerm, statusFilter]);
 
   const affairFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.affairs.filter(
       (a) =>
-        !q || a.title.toLowerCase().includes(q) || a.category.toLowerCase().includes(q)
+        matchesStatus(a.published) &&
+        (!q || a.title.toLowerCase().includes(q) || a.category.toLowerCase().includes(q))
     );
-  }, [state.affairs, searchTerm]);
+  }, [state.affairs, searchTerm, statusFilter]);
 
   const jobFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.jobs.filter(
       (j) =>
-        !q ||
-        j.title.toLowerCase().includes(q) ||
-        j.organization.toLowerCase().includes(q) ||
-        j.tab.toLowerCase().includes(q)
+        matchesStatus(j.published) &&
+        (!q ||
+          j.title.toLowerCase().includes(q) ||
+          j.organization.toLowerCase().includes(q) ||
+          j.tab.toLowerCase().includes(q))
     );
-  }, [state.jobs, searchTerm]);
+  }, [state.jobs, searchTerm, statusFilter]);
 
   const typingFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.typingPassages.filter(
       (tp) =>
-        !q ||
-        tp.title.toLowerCase().includes(q) ||
-        tp.langLabel.toLowerCase().includes(q)
+        matchesStatus(tp.published) &&
+        (!q ||
+          tp.title.toLowerCase().includes(q) ||
+          tp.langLabel.toLowerCase().includes(q))
     );
-  }, [state.typingPassages, searchTerm]);
+  }, [state.typingPassages, searchTerm, statusFilter]);
 
   const notifFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return state.notificationsList.filter(
       (n) =>
-        !q ||
-        n.title.toLowerCase().includes(q) ||
-        n.audience.toLowerCase().includes(q)
+        matchesStatus(n.published !== false) &&
+        (!q ||
+          n.title.toLowerCase().includes(q) ||
+          n.audience.toLowerCase().includes(q))
     );
-  }, [state.notificationsList, searchTerm]);
+  }, [state.notificationsList, searchTerm, statusFilter]);
+
+  const bannerFiltered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return state.banners.filter(
+      (b) =>
+        matchesStatus(b.visible) &&
+        (!q ||
+          b.title.toLowerCase().includes(q) ||
+          b.subtitle.toLowerCase().includes(q))
+    );
+  }, [state.banners, searchTerm, statusFilter]);
+
+  const hbFiltered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return state.homepageSections.filter(
+      (sec) =>
+        matchesStatus(sec.visible) &&
+        (!q ||
+          sec.name.toLowerCase().includes(q) ||
+          sec.heading.toLowerCase().includes(q))
+    );
+  }, [state.homepageSections, searchTerm, statusFilter]);
 
   const genericRows = useMemo(() => {
     const rows = state.adminTables[section] || [];
     const q = searchTerm.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      Object.values(r).some((val) => String(val).toLowerCase().includes(q))
-    );
-  }, [state.adminTables, section, searchTerm]);
+    return rows.filter((r) => {
+      if (section !== 'logs' && !matchesStatus(Boolean(r.pub))) return false;
+      if (!q) return true;
+      return Object.values(r).some((val) => String(val ?? '').toLowerCase().includes(q));
+    });
+  }, [state.adminTables, section, searchTerm, statusFilter]);
 
   /* -------------------- STRICT ADMIN ACCESS GATE -------------------- */
   if (!authReady) {
@@ -648,14 +729,34 @@ export const AdminPage: React.FC = () => {
     { key: 'hb', label: t.admin.sections.hb, icon: <LayoutTemplate className="h-4 w-4" /> },
     { key: 'notify', label: t.admin.sections.notify, icon: <Bell className="h-4 w-4" /> },
     { key: 'reports', label: t.admin.sections.reports, icon: <TrendingUp className="h-4 w-4" /> },
-    { key: 'sitesettings', label: t.admin.sections.sitesettings, icon: <Settings className="h-4 w-4" /> },
-    { key: 'logs', label: t.admin.sections.logs, icon: <FileText className="h-4 w-4" /> },
+    ...(isSuperAdmin
+      ? [
+          {
+            key: 'sitesettings' as SectionKey,
+            label: t.admin.sections.sitesettings,
+            icon: <Settings className="h-4 w-4" />,
+          },
+          {
+            key: 'logs' as SectionKey,
+            label: t.admin.sections.logs,
+            icon: <FileText className="h-4 w-4" />,
+          },
+        ]
+      : []),
   ];
 
   const switchSection = (key: SectionKey) => {
+    if (!isSuperAdmin && (key === 'sitesettings' || key === 'logs')) return;
     setSection(key);
     setSidebarOpen(false);
     setSearchTerm('');
+    setStatusFilter('all');
+    setPage(1);
+  };
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
     setPage(1);
   };
 
@@ -677,7 +778,7 @@ export const AdminPage: React.FC = () => {
     if (!currentBanner) return;
     setSavingBusy(true);
     try {
-      await saveBannerDoc(currentBanner);
+      await saveBannerDoc(currentBanner, 'update');
       setDraftBanner(null);
       showToast('Banner saved to Firebase!');
     } finally {
@@ -695,19 +796,20 @@ export const AdminPage: React.FC = () => {
       align: 'left',
       visible: true,
     };
-    await saveBannerDoc(newItem);
+    await saveBannerDoc(newItem, 'create');
     setSelectedBannerId(newItem.id);
     setDraftBanner(newItem);
     showToast('Banner created in Firebase.');
   };
 
-  const moveHomepageSection = async (index: number, dir: -1 | 1) => {
+  const moveHomepageSection = async (id: string, dir: -1 | 1) => {
+    const index = state.homepageSections.findIndex((s) => s.id === id);
     const target = index + dir;
-    if (target < 0 || target >= state.homepageSections.length) return;
+    if (index < 0 || target < 0 || target >= state.homepageSections.length) return;
     const next = [...state.homepageSections];
     const [removed] = next.splice(index, 1);
     next.splice(target, 0, removed);
-    await saveHomepageSectionsOrder(next);
+    await saveHomepageSectionsOrder(next, `Reordered homepage section: ${removed.name}`);
   };
 
   const addHomepageSection = async (e: React.FormEvent) => {
@@ -725,7 +827,7 @@ export const AdminPage: React.FC = () => {
         visible: true,
       },
     ];
-    await saveHomepageSectionsOrder(next);
+    await saveHomepageSectionsOrder(next, `Created homepage section: ${trimmed}`);
     setNewSectionName('');
     showToast('Homepage section saved to Firebase.');
   };
@@ -747,6 +849,28 @@ export const AdminPage: React.FC = () => {
       else if (kind === 'reports') await deleteReportDoc(id);
       else await deleteCatalogRowDoc(id);
       showToast('Deleted from Firebase.');
+      setDeleteTarget(null);
+    } finally {
+      setSavingBusy(false);
+    }
+  };
+
+  const unpublishInsteadOfDelete = async () => {
+    if (!deleteTarget) return;
+    const { kind, id } = deleteTarget;
+    setSavingBusy(true);
+    try {
+      if (kind === 'qb') {
+        const q = state.questions.find((item) => item.id === id);
+        if (q) await saveQuestionDoc({ ...q, published: false }, 'unpublish');
+      } else if (kind === 'quizzes' || kind === 'mocks') {
+        const tst = state.tests.find((item) => item.id === id);
+        if (tst) await saveTestDoc({ ...tst, published: false }, 'unpublish');
+      } else if (kind === 'courses') {
+        const crs = state.courses.find((item) => item.id === id);
+        if (crs) await saveCourseDoc({ ...crs, published: false }, 'unpublish');
+      }
+      showToast('Unpublished (moved to Draft).');
       setDeleteTarget(null);
     } finally {
       setSavingBusy(false);
@@ -892,35 +1016,67 @@ export const AdminPage: React.FC = () => {
           {/* 1. DASHBOARD */}
           {section === 'dash' && (
             <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-600 dark:text-[#9fb0c8]">
+                  Live collection totals powered by Firestore count queries.
+                </p>
+                <button
+                  type="button"
+                  disabled={countsLoading}
+                  onClick={() => void loadDashboardCounts()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-200"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${countsLoading ? 'animate-spin' : ''}`} />
+                  <span>{countsLoading ? 'Refreshing…' : 'Refresh counts'}</span>
+                </button>
+              </div>
+
               <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Registered Students</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {state.adminTables.students?.length || 0}
+                    {dashboardCounts ? dashboardCounts.studentsTotal : '…'}
+                  </div>
+                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                    {dashboardCounts
+                      ? `${dashboardCounts.studentsActive} active · ${dashboardCounts.studentsSuspended} suspended`
+                      : 'Counting…'}
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Quizzes & Mocks</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {state.tests.length}
+                    {dashboardCounts ? dashboardCounts.testsTotal : '…'}
+                  </div>
+                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                    {dashboardCounts ? `${dashboardCounts.testsPublished} published` : 'Counting…'}
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">{t.admin.totalQuestions}</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {state.questions.length}
+                    {dashboardCounts ? dashboardCounts.questionsTotal : '…'}
+                  </div>
+                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                    {dashboardCounts ? `${dashboardCounts.questionsPublished} published` : 'Counting…'}
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Study Materials / PDFs</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {state.materials.length}
+                    {dashboardCounts ? dashboardCounts.materialsTotal : '…'}
+                  </div>
+                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                    {dashboardCounts ? `${dashboardCounts.materialsPublished} published` : 'Counting…'}
                   </div>
                 </div>
                 <div className="col-span-2 lg:col-span-1 rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">{t.admin.totalBanners}</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {state.banners.length}
+                    {dashboardCounts ? dashboardCounts.bannersTotal : '…'}
+                  </div>
+                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                    {dashboardCounts ? `${dashboardCounts.bannersPublished} published` : 'Counting…'}
                   </div>
                 </div>
               </div>
@@ -928,14 +1084,14 @@ export const AdminPage: React.FC = () => {
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-7 dark:border-[#24385c] dark:bg-[#122443]">
                   <h2 className="mb-4 font-display text-base font-bold text-slate-900 dark:text-white">
-                    {t.admin.weeklyChart}
+                    Firestore Content Overview (Published vs Draft)
                   </h2>
                   <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={WEEKLY_CHART_DATA}>
+                      <BarChart data={dashboardCounts?.chartData || []}>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                        <XAxis dataKey="day" tick={{ fill: tickColor, fontSize: 12 }} />
-                        <YAxis tick={{ fill: tickColor, fontSize: 12 }} />
+                        <XAxis dataKey="label" tick={{ fill: tickColor, fontSize: 11 }} />
+                        <YAxis allowDecimals={false} tick={{ fill: tickColor, fontSize: 12 }} />
                         <Tooltip
                           contentStyle={{
                             backgroundColor: isDark ? '#122443' : '#ffffff',
@@ -944,35 +1100,100 @@ export const AdminPage: React.FC = () => {
                             borderRadius: 12,
                           }}
                         />
-                        <Bar dataKey="attempts" fill={isDark ? '#facc15' : '#102544'} radius={[6, 6, 0, 0]} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Bar
+                          dataKey="published"
+                          name="Published"
+                          fill={isDark ? '#facc15' : '#102544'}
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Bar
+                          dataKey="draft"
+                          name="Draft"
+                          fill={isDark ? '#475569' : '#94a3b8'}
+                          radius={[4, 4, 0, 0]}
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-5 dark:border-[#24385c] dark:bg-[#122443]">
-                  <h2 className="mb-4 font-display text-base font-bold text-slate-900 dark:text-white">
-                    Recent Firebase Activity
-                  </h2>
-                  {(state.adminTables.logs || []).length === 0 ? (
-                    <p className="text-sm text-slate-500 dark:text-[#9fb0c8]">
-                      Activity logs appear here automatically as you add or edit content.
-                    </p>
-                  ) : (
-                    <ul className="divide-y divide-slate-200 dark:divide-[#24385c]">
-                      {(state.adminTables.logs || []).slice(0, 6).map((log) => (
-                        <li key={log.id} className="py-3 text-sm">
-                          <div className="font-medium text-slate-900 dark:text-slate-100">
-                            {String(log.act || '')}
-                          </div>
-                          <div className="mt-0.5 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
-                            {String(log.time || '')} · {String(log.who || '')}
-                          </div>
+                {isSuperAdmin ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-5 dark:border-[#24385c] dark:bg-[#122443]">
+                    <div className="mb-4 flex items-center justify-between gap-2">
+                      <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                        Recent Activity Logs ({dashboardCounts?.logsTotal ?? (state.adminTables.logs || []).length})
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => switchSection('logs')}
+                        className="text-xs font-semibold text-[#102544] hover:underline dark:text-[#facc15]"
+                      >
+                        View all
+                      </button>
+                    </div>
+                    {(state.adminTables.logs || []).length === 0 ? (
+                      <p className="text-sm text-slate-500 dark:text-[#9fb0c8]">
+                        Activity logs appear here automatically as you add, edit, publish, or delete content.
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-slate-200 dark:divide-[#24385c]">
+                        {(state.adminTables.logs || []).slice(0, 6).map((log) => (
+                          <li key={log.id} className="py-3 text-sm">
+                            <div className="font-medium text-slate-900 dark:text-slate-100">
+                              {String(log.act || '')}
+                            </div>
+                            <div className="mt-0.5 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {String(log.time || '')} · {String(log.who || '')}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-5 dark:border-[#24385c] dark:bg-[#122443]">
+                    <h2 className="mb-4 font-display text-base font-bold text-slate-900 dark:text-white">
+                      Collection Counts Summary
+                    </h2>
+                    <ul className="divide-y divide-slate-200 text-sm dark:divide-[#24385c]">
+                      {[
+                        {
+                          label: 'Courses',
+                          total: dashboardCounts?.coursesTotal,
+                          pub: dashboardCounts?.coursesPublished,
+                        },
+                        {
+                          label: 'Current Affairs',
+                          total: dashboardCounts?.affairsTotal,
+                          pub: dashboardCounts?.affairsPublished,
+                        },
+                        {
+                          label: 'Job Updates',
+                          total: dashboardCounts?.jobsTotal,
+                          pub: dashboardCounts?.jobsPublished,
+                        },
+                        {
+                          label: 'Typing Passages',
+                          total: dashboardCounts?.typingTotal,
+                          pub: dashboardCounts?.typingPublished,
+                        },
+                        {
+                          label: 'Notifications',
+                          total: dashboardCounts?.notificationsTotal,
+                          pub: dashboardCounts?.notificationsPublished,
+                        },
+                      ].map((row) => (
+                        <li key={row.label} className="flex items-center justify-between py-2.5">
+                          <span className="font-medium text-slate-800 dark:text-slate-100">{row.label}</span>
+                          <span className="font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                            {row.total !== undefined ? `${row.pub ?? 0} published / ${row.total} total` : '…'}
+                          </span>
                         </li>
                       ))}
                     </ul>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -982,12 +1203,22 @@ export const AdminPage: React.FC = () => {
             const { slice, totalPages, safePage, totalCount } = paginate(genericRows);
             return (
               <div className="space-y-4">
-                <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                      publishedLabel="Active"
+                      draftLabel="Suspended"
+                    />
+                  </div>
+                </div>
                 {slice.length === 0 ? (
                   <EmptyState
-                    title="No signed-in students recorded yet"
-                    subtitle="Students appear here automatically after signing in with Google."
-                    onReset={() => setSearchTerm('')}
+                    title="No matching students found"
+                    subtitle="Students appear here after signing in, or try clearing filters."
+                    onReset={resetFilters}
                   />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
@@ -998,61 +1229,90 @@ export const AdminPage: React.FC = () => {
                           <th className="px-4 py-3">Role</th>
                           <th className="px-4 py-3">Target Exam</th>
                           <th className="px-4 py-3">Points</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
-                        {slice.map((row) => (
-                          <tr key={row.id}>
-                            <td className="px-4 py-3">
-                              <div className="font-semibold text-slate-900 dark:text-white">
-                                {String(row.name || row.id)}
-                              </div>
-                              {row.email && (
-                                <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">
-                                  {String(row.email)}
+                        {slice.map((row) => {
+                          const isSelf = row.id === firebaseUser.uid;
+                          const isActive = row.status === 'Active';
+                          return (
+                            <tr key={row.id}>
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-900 dark:text-white">
+                                  {String(row.name || row.id)}
                                 </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold uppercase ${
-                                  row.role === 'super_admin'
-                                    ? 'bg-[#facc15]/25 text-[#102544] dark:text-[#facc15]'
-                                    : row.role === 'admin'
-                                      ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300'
-                                      : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {String(row.role || 'student')}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
-                              {String(row.exam || 'SSC')}
-                            </td>
-                            <td className="px-4 py-3 font-mono-num text-slate-700 dark:text-slate-200">
-                              {String(row.points || '0')}
-                            </td>
-                            <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void toggleStudentStatusDoc(
-                                    row.id,
-                                    row.status === 'Active' ? 'Suspended' : 'Active'
-                                  )
-                                }
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  row.status === 'Active'
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300'
-                                }`}
-                              >
-                                {String(row.status || 'Active')}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                                {row.email && (
+                                  <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                    {String(row.email)}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {isSuperAdmin ? (
+                                  <select
+                                    aria-label={`Role for ${String(row.name || row.id)}`}
+                                    disabled={isSelf || roleUpdatingUid === row.id}
+                                    value={String(row.role || 'student')}
+                                    title={isSelf ? 'You cannot change your own role' : 'Change user role'}
+                                    onChange={async (e) => {
+                                      const nextRole = e.target.value as UserRole;
+                                      setRoleUpdatingUid(row.id);
+                                      try {
+                                        await updateUserRoleDoc(row.id, nextRole);
+                                        showToast(`Updated role to ${nextRole}.`);
+                                      } catch (err) {
+                                        showToast(err instanceof Error ? err.message : 'Failed to update role.');
+                                      } finally {
+                                        setRoleUpdatingUid(null);
+                                      }
+                                    }}
+                                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 disabled:opacity-60 dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                                  >
+                                    <option value="student">student</option>
+                                    <option value="admin">admin</option>
+                                    <option value="super_admin">super_admin</option>
+                                  </select>
+                                ) : (
+                                  <span
+                                    className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold uppercase ${
+                                      row.role === 'super_admin'
+                                        ? 'bg-[#facc15]/25 text-[#102544] dark:text-[#facc15]'
+                                        : row.role === 'admin'
+                                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300'
+                                          : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
+                                    }`}
+                                  >
+                                    {String(row.role || 'student')}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
+                                {String(row.exam || 'SSC')}
+                              </td>
+                              <td className="px-4 py-3 font-mono-num text-slate-700 dark:text-slate-200">
+                                {String(row.points || '0')}
+                              </td>
+                              <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                {row.updatedAt || '—'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <PublishToggleButton
+                                  published={isActive}
+                                  publishedLabel="Active"
+                                  draftLabel="Suspended"
+                                  onToggle={() =>
+                                    void toggleStudentStatusDoc(
+                                      row.id,
+                                      isActive ? 'Suspended' : 'Active'
+                                    )
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1068,7 +1328,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -1107,13 +1373,13 @@ export const AdminPage: React.FC = () => {
                       className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                     >
                       <Plus className="h-4 w-4" />
-                      <span>{t.admin.addQuestion}</span>
+                      <span>Add Question</span>
                     </button>
                   </div>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1121,6 +1387,7 @@ export const AdminPage: React.FC = () => {
                         <tr>
                           <th className="px-4 py-3">Question</th>
                           <th className="px-4 py-3">Subject &amp; Lang</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1137,18 +1404,19 @@ export const AdminPage: React.FC = () => {
                                 {q.language || 'English'}
                               </span>
                             </td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {q.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveQuestionDoc({ ...q, published: !q.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  q.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {q.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={q.published}
+                                onToggle={() =>
+                                  void saveQuestionDoc(
+                                    { ...q, published: !q.published },
+                                    q.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1158,7 +1426,14 @@ export const AdminPage: React.FC = () => {
                                     item: { ...q, language: q.language || 'English' },
                                   })
                                 }
-                                onDelete={() => setDeleteTarget({ kind: 'qb', id: q.id, label: q.question })}
+                                onDelete={() =>
+                                  setDeleteTarget({
+                                    kind: 'qb',
+                                    id: q.id,
+                                    label: q.question,
+                                    isPublished: q.published,
+                                  })
+                                }
                               />
                             </td>
                           </tr>
@@ -1181,7 +1456,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1212,21 +1493,22 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>{section === 'quizzes' ? 'Create Quiz' : 'Create Mock Test'}</span>
+                    <span>{section === 'quizzes' ? 'Add Quiz' : 'Add Mock Test'}</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
                       <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
                         <tr>
                           <th className="px-4 py-3">Test Title</th>
-                          <th className="px-4 py-3">Section & Exams</th>
+                          <th className="px-4 py-3">Section &amp; Exams</th>
                           <th className="px-4 py-3">Duration</th>
                           <th className="px-4 py-3">Questions</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1238,6 +1520,7 @@ export const AdminPage: React.FC = () => {
                           const qCount = tst.questionCount ?? tst.questionLimit ?? defaultCount;
                           const assignedExams = (tst.examIds || [])
                             .map((eid) => EXAM_CATEGORIES.find((ex) => ex.id === eid)?.name || eid.toUpperCase());
+                          const isPub = tst.published !== false;
                           return (
                             <tr key={tst.id}>
                               <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
@@ -1268,20 +1551,19 @@ export const AdminPage: React.FC = () => {
                               <td className="px-4 py-3 font-mono-num text-slate-600 dark:text-[#9fb0c8]">
                                 {qCount} Qs{tst.shuffle ? ' · Random' : ''}
                               </td>
+                              <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                {tst.updatedAt || '—'}
+                              </td>
                               <td className="px-4 py-3">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void saveTestDoc({ ...tst, published: !(tst.published ?? true) })
+                                <PublishToggleButton
+                                  published={isPub}
+                                  onToggle={() =>
+                                    void saveTestDoc(
+                                      { ...tst, published: !isPub },
+                                      isPub ? 'unpublish' : 'publish'
+                                    )
                                   }
-                                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                    tst.published !== false
-                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                      : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                  }`}
-                                >
-                                  {tst.published !== false ? t.common.published : t.common.draft}
-                                </button>
+                                />
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="inline-flex items-center gap-1.5">
@@ -1316,7 +1598,12 @@ export const AdminPage: React.FC = () => {
                                       })
                                     }
                                     onDelete={() =>
-                                      setDeleteTarget({ kind: section, id: tst.id, label: tst.name })
+                                      setDeleteTarget({
+                                        kind: section,
+                                        id: tst.id,
+                                        label: tst.name,
+                                        isPublished: isPub,
+                                      })
                                     }
                                   />
                                 </div>
@@ -1340,7 +1627,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -1360,12 +1653,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Upload className="h-4 w-4" />
-                    <span>Upload PDF / Add Note</span>
+                    <span>Add Material</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1374,6 +1667,7 @@ export const AdminPage: React.FC = () => {
                           <th className="px-4 py-3">Title</th>
                           <th className="px-4 py-3">Subject</th>
                           <th className="px-4 py-3">PDF File</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1396,18 +1690,19 @@ export const AdminPage: React.FC = () => {
                                 <span className="text-slate-400">Summary only</span>
                               )}
                             </td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {m.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveMaterialDoc({ ...m, published: !m.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  m.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {m.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={m.published}
+                                onToggle={() =>
+                                  void saveMaterialDoc(
+                                    { ...m, published: !m.published },
+                                    m.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1438,7 +1733,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1462,7 +1763,7 @@ export const AdminPage: React.FC = () => {
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1470,6 +1771,7 @@ export const AdminPage: React.FC = () => {
                         <tr>
                           <th className="px-4 py-3">Course Title</th>
                           <th className="px-4 py-3">Lessons</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1483,18 +1785,19 @@ export const AdminPage: React.FC = () => {
                             <td className="px-4 py-3 font-mono-num text-slate-600 dark:text-[#9fb0c8]">
                               {c.lessons.length}
                             </td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {c.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveCourseDoc({ ...c, published: !c.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  c.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {c.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={c.published}
+                                onToggle={() =>
+                                  void saveCourseDoc(
+                                    { ...c, published: !c.published },
+                                    c.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1506,7 +1809,12 @@ export const AdminPage: React.FC = () => {
                                   })
                                 }
                                 onDelete={() =>
-                                  setDeleteTarget({ kind: 'courses', id: c.id, label: c.title })
+                                  setDeleteTarget({
+                                    kind: 'courses',
+                                    id: c.id,
+                                    label: c.title,
+                                    isPublished: c.published,
+                                  })
                                 }
                               />
                             </td>
@@ -1528,7 +1836,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1548,12 +1862,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>{t.common.add}</span>
+                    <span>Add Current Affair</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1562,6 +1876,7 @@ export const AdminPage: React.FC = () => {
                           <th className="px-4 py-3">Headline</th>
                           <th className="px-4 py-3">Category</th>
                           <th className="px-4 py-3">Period</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1574,18 +1889,19 @@ export const AdminPage: React.FC = () => {
                             </td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{a.category}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{a.period}</td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {a.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveAffairDoc({ ...a, published: !a.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  a.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {a.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={a.published}
+                                onToggle={() =>
+                                  void saveAffairDoc(
+                                    { ...a, published: !a.published },
+                                    a.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1613,7 +1929,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1636,12 +1958,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>{t.common.add}</span>
+                    <span>Add Job Update</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1650,6 +1972,7 @@ export const AdminPage: React.FC = () => {
                           <th className="px-4 py-3">Title</th>
                           <th className="px-4 py-3">Tab</th>
                           <th className="px-4 py-3">Deadline</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1660,18 +1983,19 @@ export const AdminPage: React.FC = () => {
                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{j.title}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{j.tab}</td>
                             <td className="px-4 py-3 font-mono-num text-slate-600 dark:text-[#9fb0c8]">{j.deadline}</td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {j.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveJobDoc({ ...j, published: !j.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  j.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {j.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={j.published}
+                                onToggle={() =>
+                                  void saveJobDoc(
+                                    { ...j, published: !j.published },
+                                    j.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1697,7 +2021,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1716,12 +2046,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>Add Passage</span>
+                    <span>Add Typing Passage</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1729,6 +2059,7 @@ export const AdminPage: React.FC = () => {
                         <tr>
                           <th className="px-4 py-3">Title</th>
                           <th className="px-4 py-3">Language</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1738,18 +2069,19 @@ export const AdminPage: React.FC = () => {
                           <tr key={tp.id}>
                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{tp.title}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{tp.langLabel}</td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {tp.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveTypingPassageDoc({ ...tp, published: !tp.published })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  tp.published
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {tp.published ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={tp.published}
+                                onToggle={() =>
+                                  void saveTypingPassageDoc(
+                                    { ...tp, published: !tp.published },
+                                    tp.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -1775,7 +2107,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -1796,12 +2134,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>Send Notification</span>
+                    <span>Add Notification</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -1810,6 +2148,7 @@ export const AdminPage: React.FC = () => {
                           <th className="px-4 py-3">Title</th>
                           <th className="px-4 py-3">Audience</th>
                           <th className="px-4 py-3">Type</th>
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -1817,25 +2156,25 @@ export const AdminPage: React.FC = () => {
                       <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
                         {slice.map((n) => {
                           const docId = n.docId || `nt_${n.id}`;
+                          const isPub = n.published !== false;
                           return (
                             <tr key={docId}>
                               <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{n.title}</td>
                               <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{n.audience}</td>
                               <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{n.type}</td>
+                              <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                {n.updatedAt || '—'}
+                              </td>
                               <td className="px-4 py-3">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void saveNotificationDoc({ ...n, published: !(n.published ?? true) })
+                                <PublishToggleButton
+                                  published={isPub}
+                                  onToggle={() =>
+                                    void saveNotificationDoc(
+                                      { ...n, published: !isPub },
+                                      isPub ? 'unpublish' : 'publish'
+                                    )
                                   }
-                                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                    n.published !== false
-                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                      : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                  }`}
-                                >
-                                  {n.published !== false ? t.common.published : t.common.draft}
-                                </button>
+                                />
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <ActionButtons
@@ -1859,308 +2198,375 @@ export const AdminPage: React.FC = () => {
           })()}
 
           {/* 11. BANNERS MANAGER */}
-          {section === 'banners' && (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              <div className="space-y-3 lg:col-span-5">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                    {t.admin.sections.banners} ({state.banners.length})
-                  </h2>
+          {section === 'banners' && (() => {
+            const { slice, totalPages, safePage, totalCount } = paginate(bannerFiltered);
+            return (
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => void addNewBanner()}
-                    className="inline-flex items-center gap-1 rounded-xl bg-[#102544] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>{t.admin.bannerAdd}</span>
+                    <Plus className="h-4 w-4" />
+                    <span>Add Banner</span>
                   </button>
                 </div>
 
-                {state.banners.map((b) => (
-                  <div
-                    key={b.id}
-                    className={`flex items-center justify-between rounded-xl border p-3.5 transition-colors ${
-                      currentBanner?.id === b.id
-                        ? 'border-[#102544] bg-[#eef2f8]/60 dark:border-[#facc15] dark:bg-[#16294b]'
-                        : 'border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedBannerId(b.id);
-                        setDraftBanner({ ...b });
-                      }}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                        {b.title}
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">
-                        {b.visible ? t.common.published : t.common.hide}
-                      </div>
-                    </button>
-                    {state.banners.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDeleteTarget({ kind: 'banners', id: b.id, label: b.title })
-                        }
-                        className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 dark:text-red-400"
-                        aria-label={t.common.delete}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+                  <div className="space-y-3 lg:col-span-5">
+                    {slice.length === 0 ? (
+                      <EmptyState onReset={resetFilters} />
+                    ) : (
+                      <>
+                        {slice.map((b) => (
+                          <div
+                            key={b.id}
+                            className={`flex items-center justify-between gap-2 rounded-xl border p-3.5 transition-colors ${
+                              currentBanner?.id === b.id
+                                ? 'border-[#102544] bg-[#eef2f8]/60 dark:border-[#facc15] dark:bg-[#16294b]'
+                                : 'border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedBannerId(b.id);
+                                setDraftBanner({ ...b });
+                              }}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                                {b.title}
+                              </div>
+                              <div className="mt-0.5 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                                Last updated: {b.updatedAt || '—'}
+                              </div>
+                            </button>
+                            <PublishToggleButton
+                              published={b.visible}
+                              onToggle={() =>
+                                void saveBannerDoc(
+                                  { ...b, visible: !b.visible },
+                                  b.visible ? 'unpublish' : 'publish'
+                                )
+                              }
+                            />
+                            {state.banners.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({ kind: 'banners', id: b.id, label: b.title })
+                                }
+                                className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 dark:text-red-400"
+                                aria-label={t.common.delete}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        <PaginationBar
+                          page={safePage}
+                          totalPages={totalPages}
+                          totalCount={totalCount}
+                          onPageChange={setPage}
+                        />
+                      </>
                     )}
                   </div>
-                ))}
-              </div>
 
-              {currentBanner && (
-                <div className="space-y-5 lg:col-span-7">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]">
-                    <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-[#9fb0c8]">
-                      {t.admin.bannerPreview}
-                    </div>
-                    {(() => {
-                      const clean = (currentBanner.bgColor || '').replace('#', '').trim();
-                      const full =
-                        clean.length === 3
-                          ? clean.split('').map((c) => c + c).join('')
-                          : clean;
-                      const isLight =
-                        /^[0-9a-fA-F]{6}$/.test(full) &&
-                        (0.299 * parseInt(full.slice(0, 2), 16) +
-                          0.587 * parseInt(full.slice(2, 4), 16) +
-                          0.114 * parseInt(full.slice(4, 6), 16)) /
-                          255 >
-                          0.62;
-                      return (
-                        <div
-                          className={`rounded-xl p-6 ${
-                            isLight ? 'text-[#0f172a]' : 'text-white'
-                          } ${
-                            currentBanner.align === 'center'
-                              ? 'text-center'
-                              : currentBanner.align === 'right'
-                                ? 'text-right'
-                                : 'text-left'
-                          }`}
-                          style={{ backgroundColor: currentBanner.bgColor }}
-                        >
-                          <h3 className="font-display text-xl font-extrabold">{currentBanner.title}</h3>
-                          <p
-                            className={`mt-1 text-sm ${
-                              isLight ? 'text-slate-800' : 'text-slate-200'
-                            }`}
-                          >
-                            {currentBanner.subtitle}
-                          </p>
-                          <span
-                            className={`mt-4 inline-block rounded-lg px-4 py-2 text-xs font-bold ${
-                              isLight
-                                ? 'bg-[#102544] text-white'
-                                : 'bg-[#facc15] text-[#102544]'
-                            }`}
-                          >
-                            {currentBanner.buttonText}
-                          </span>
+                  {currentBanner && (
+                    <div className="space-y-5 lg:col-span-7">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]">
+                        <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-[#9fb0c8]">
+                          {t.admin.bannerPreview}
                         </div>
-                      );
-                    })()}
-                  </div>
+                        {(() => {
+                          const clean = (currentBanner.bgColor || '').replace('#', '').trim();
+                          const full =
+                            clean.length === 3
+                              ? clean.split('').map((c) => c + c).join('')
+                              : clean;
+                          const isLight =
+                            /^[0-9a-fA-F]{6}$/.test(full) &&
+                            (0.299 * parseInt(full.slice(0, 2), 16) +
+                              0.587 * parseInt(full.slice(2, 4), 16) +
+                              0.114 * parseInt(full.slice(4, 6), 16)) /
+                              255 >
+                              0.62;
+                          return (
+                            <div
+                              className={`rounded-xl p-6 ${
+                                isLight ? 'text-[#0f172a]' : 'text-white'
+                              } ${
+                                currentBanner.align === 'center'
+                                  ? 'text-center'
+                                  : currentBanner.align === 'right'
+                                    ? 'text-right'
+                                    : 'text-left'
+                              }`}
+                              style={{ backgroundColor: currentBanner.bgColor }}
+                            >
+                              <h3 className="font-display text-xl font-extrabold">{currentBanner.title}</h3>
+                              <p
+                                className={`mt-1 text-sm ${
+                                  isLight ? 'text-slate-800' : 'text-slate-200'
+                                }`}
+                              >
+                                {currentBanner.subtitle}
+                              </p>
+                              <span
+                                className={`mt-4 inline-block rounded-lg px-4 py-2 text-xs font-bold ${
+                                  isLight
+                                    ? 'bg-[#102544] text-white'
+                                    : 'bg-[#facc15] text-[#102544]'
+                                }`}
+                              >
+                                {currentBanner.buttonText}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </div>
 
-                  <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]">
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold">Title</label>
-                      <input
-                        type="text"
-                        value={currentBanner.title}
-                        onChange={(e) => updateDraftBanner('title', e.target.value)}
-                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold">Subtitle</label>
-                      <input
-                        type="text"
-                        value={currentBanner.subtitle}
-                        onChange={(e) => updateDraftBanner('subtitle', e.target.value)}
-                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                      <div>
-                        <label className="mb-1 block text-xs font-semibold">Button text</label>
-                        <input
-                          type="text"
-                          value={currentBanner.buttonText}
-                          onChange={(e) => updateDraftBanner('buttonText', e.target.value)}
-                          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-semibold">Background</label>
-                        <input
-                          type="color"
-                          value={currentBanner.bgColor}
-                          onChange={(e) => updateDraftBanner('bgColor', e.target.value)}
-                          className="h-10 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-[#24385c] dark:bg-[#16294b]"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-semibold">Alignment</label>
-                        <select
-                          value={currentBanner.align}
-                          onChange={(e) =>
-                            updateDraftBanner('align', e.target.value as 'left' | 'center' | 'right')
-                          }
-                          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-                        >
-                          <option value="left">Left</option>
-                          <option value="center">Center</option>
-                          <option value="right">Right</option>
-                        </select>
-                      </div>
-                    </div>
+                      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold">Title</label>
+                          <input
+                            type="text"
+                            value={currentBanner.title}
+                            onChange={(e) => updateDraftBanner('title', e.target.value)}
+                            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold">Subtitle</label>
+                          <input
+                            type="text"
+                            value={currentBanner.subtitle}
+                            onChange={(e) => updateDraftBanner('subtitle', e.target.value)}
+                            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold">Button text</label>
+                            <input
+                              type="text"
+                              value={currentBanner.buttonText}
+                              onChange={(e) => updateDraftBanner('buttonText', e.target.value)}
+                              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold">Background</label>
+                            <input
+                              type="color"
+                              value={currentBanner.bgColor}
+                              onChange={(e) => updateDraftBanner('bgColor', e.target.value)}
+                              className="h-10 w-full cursor-pointer rounded-xl border border-slate-200 bg-white p-1 dark:border-[#24385c] dark:bg-[#16294b]"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold">Alignment</label>
+                            <select
+                              value={currentBanner.align}
+                              onChange={(e) =>
+                                updateDraftBanner('align', e.target.value as 'left' | 'center' | 'right')
+                              }
+                              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                            >
+                              <option value="left">Left</option>
+                              <option value="center">Center</option>
+                              <option value="right">Right</option>
+                            </select>
+                          </div>
+                        </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                      <label className="flex items-center gap-2 text-sm font-medium">
-                        <input
-                          type="checkbox"
-                          checked={currentBanner.visible}
-                          onChange={(e) => updateDraftBanner('visible', e.target.checked)}
-                          className="h-4 w-4 accent-[#102544]"
-                        />
-                        <span>{t.admin.bannerVisible}</span>
-                      </label>
-                      <button
-                        type="button"
-                        disabled={savingBusy}
-                        onClick={() => void saveCurrentBanner()}
-                        className="rounded-xl bg-[#102544] px-5 py-2 text-sm font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-60 dark:bg-[#facc15] dark:text-[#102544]"
-                      >
-                        {savingBusy ? 'Saving…' : 'Save Banner'}
-                      </button>
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                          <label className="flex items-center gap-2 text-sm font-medium">
+                            <input
+                              type="checkbox"
+                              checked={currentBanner.visible}
+                              onChange={(e) => updateDraftBanner('visible', e.target.checked)}
+                              className="h-4 w-4 accent-[#102544]"
+                            />
+                            <span>{t.admin.bannerVisible}</span>
+                          </label>
+                          <button
+                            type="button"
+                            disabled={savingBusy}
+                            onClick={() => void saveCurrentBanner()}
+                            className="rounded-xl bg-[#102544] px-5 py-2 text-sm font-bold text-white hover:bg-[#1b3a6b] disabled:opacity-60 dark:bg-[#facc15] dark:text-[#102544]"
+                          >
+                            {savingBusy ? 'Saving…' : 'Save Banner'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* 12. HOMEPAGE BUILDER */}
-          {section === 'hb' && (
-            <div className="space-y-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-slate-600 dark:text-[#9fb0c8]">{t.admin.hbSub}</p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await saveHomepageSectionsOrder(state.homepageSections);
-                    showToast('Homepage layout published to Firebase!');
-                  }}
-                  className="rounded-xl bg-[#102544] px-4 py-2 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
-                >
-                  Save & Publish Layout
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {state.homepageSections.map((sec, idx) => (
-                  <div
-                    key={sec.id}
-                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between dark:border-[#24385c] dark:bg-[#122443]"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      <div className="text-xs font-semibold text-slate-500 dark:text-[#9fb0c8]">
-                        {sec.name}
-                      </div>
-                      <input
-                        type="text"
-                        defaultValue={sec.heading}
-                        onBlur={(e) => {
-                          const val = e.target.value.trim();
-                          if (!val || val === sec.heading) return;
-                          const next = state.homepageSections.map((item) =>
-                            item.id === sec.id ? { ...item, heading: val } : item
-                          );
-                          void saveHomepageSectionsOrder(next);
-                        }}
-                        className="h-9 w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void moveHomepageSection(idx, -1)}
-                        disabled={idx === 0}
-                        aria-label="Move up"
-                        className="rounded-lg border border-slate-200 p-2 text-slate-600 disabled:opacity-40 dark:border-[#24385c] dark:text-slate-200"
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void moveHomepageSection(idx, 1)}
-                        disabled={idx === state.homepageSections.length - 1}
-                        aria-label="Move down"
-                        className="rounded-lg border border-slate-200 p-2 text-slate-600 disabled:opacity-40 dark:border-[#24385c] dark:text-slate-200"
-                      >
-                        <ArrowDown className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = state.homepageSections.map((item) =>
-                            item.id === sec.id ? { ...item, visible: !item.visible } : item
-                          );
-                          void saveHomepageSectionsOrder(next);
-                        }}
-                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                          sec.visible
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                            : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                        }`}
-                      >
-                        {sec.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                        <span>{sec.visible ? t.common.show : t.common.hide}</span>
-                      </button>
-                    </div>
+          {section === 'hb' && (() => {
+            const { slice, totalPages, safePage, totalCount } = paginate(hbFiltered);
+            return (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
                   </div>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await saveHomepageSectionsOrder(
+                        state.homepageSections,
+                        'Published homepage layout'
+                      );
+                      showToast('Homepage layout published to Firebase!');
+                    }}
+                    className="rounded-xl bg-[#102544] px-4 py-2 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                  >
+                    Save &amp; Publish Layout
+                  </button>
+                </div>
 
-              <form onSubmit={(e) => void addHomepageSection(e)} className="flex max-w-md gap-2">
-                <input
-                  type="text"
-                  value={newSectionName}
-                  onChange={(e) => setNewSectionName(e.target.value)}
-                  placeholder={t.admin.newSectionPlaceholder}
-                  className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
-                />
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{t.admin.addSection}</span>
-                </button>
-              </form>
-            </div>
-          )}
+                {slice.length === 0 ? (
+                  <EmptyState onReset={resetFilters} />
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
+                        <tr>
+                          <th className="px-4 py-3">Section</th>
+                          <th className="px-4 py-3">Heading</th>
+                          <th className="px-4 py-3">Last updated</th>
+                          <th className="px-4 py-3">{t.common.status}</th>
+                          <th className="px-4 py-3 text-right">Order</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
+                        {slice.map((sec) => {
+                          const globalIdx = state.homepageSections.findIndex((s) => s.id === sec.id);
+                          return (
+                            <tr key={sec.id}>
+                              <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
+                                {sec.name}
+                              </td>
+                              <td className="px-4 py-3">
+                                <input
+                                  type="text"
+                                  defaultValue={sec.heading}
+                                  onBlur={(e) => {
+                                    const val = e.target.value.trim();
+                                    if (!val || val === sec.heading) return;
+                                    const next = state.homepageSections.map((item) =>
+                                      item.id === sec.id ? { ...item, heading: val } : item
+                                    );
+                                    void saveHomepageSectionsOrder(
+                                      next,
+                                      `Updated homepage section heading: ${sec.name}`
+                                    );
+                                  }}
+                                  className="h-9 w-full min-w-[200px] max-w-md rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                                />
+                              </td>
+                              <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                {sec.updatedAt || '—'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <PublishToggleButton
+                                  published={sec.visible}
+                                  onToggle={() => {
+                                    const next = state.homepageSections.map((item) =>
+                                      item.id === sec.id
+                                        ? { ...item, visible: !item.visible }
+                                        : item
+                                    );
+                                    void saveHomepageSectionsOrder(
+                                      next,
+                                      `${sec.visible ? 'Unpublished' : 'Published'} homepage section: ${sec.name}`
+                                    );
+                                  }}
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => void moveHomepageSection(sec.id, -1)}
+                                    disabled={globalIdx <= 0}
+                                    aria-label="Move up"
+                                    className="rounded-lg border border-slate-200 p-1.5 text-slate-600 disabled:opacity-40 dark:border-[#24385c] dark:text-slate-200"
+                                  >
+                                    <ArrowUp className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void moveHomepageSection(sec.id, 1)}
+                                    disabled={globalIdx >= state.homepageSections.length - 1}
+                                    aria-label="Move down"
+                                    className="rounded-lg border border-slate-200 p-1.5 text-slate-600 disabled:opacity-40 dark:border-[#24385c] dark:text-slate-200"
+                                  >
+                                    <ArrowDown className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <PaginationBar page={safePage} totalPages={totalPages} totalCount={totalCount} onPageChange={setPage} />
+
+                <form onSubmit={(e) => void addHomepageSection(e)} className="flex max-w-md gap-2">
+                  <input
+                    type="text"
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    placeholder={t.admin.newSectionPlaceholder}
+                    className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#122443] dark:text-white"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Add Homepage Section</span>
+                  </button>
+                </form>
+              </div>
+            );
+          })()}
 
           {/* 13. CATALOG TABLES (EXAMS, SUBJECTS, CATEGORIES, WEBSITE SETTINGS) */}
           {(section === 'exams' ||
             section === 'subjects' ||
             section === 'categories' ||
-            section === 'sitesettings') && (() => {
+            (section === 'sitesettings' && isSuperAdmin)) && (() => {
             const cols = CATALOG_SCHEMA[section];
             const { slice, totalPages, safePage, totalCount } = paginate(genericRows);
             return (
               <div className="space-y-6">
-                {section === 'sitesettings' && (
+                {section === 'sitesettings' && isSuperAdmin && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#24385c] dark:bg-[#122443]">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4 dark:border-[#24385c]">
                       <div>
@@ -2672,7 +3078,7 @@ export const AdminPage: React.FC = () => {
                   </div>
                 )}
 
-                {section === 'sitesettings' && (
+                {section === 'sitesettings' && isSuperAdmin && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#24385c] dark:bg-[#122443]">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4 dark:border-[#24385c]">
                       <div>
@@ -2941,7 +3347,13 @@ export const AdminPage: React.FC = () => {
                 )}
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -2954,12 +3366,12 @@ export const AdminPage: React.FC = () => {
                     className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>{t.common.add}</span>
+                    <span>{CATALOG_ADD_LABELS[section]}</span>
                   </button>
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -2968,6 +3380,7 @@ export const AdminPage: React.FC = () => {
                           {cols.map((c) => (
                             <th key={c.key} className="px-4 py-3">{c.label}</th>
                           ))}
+                          <th className="px-4 py-3">Last updated</th>
                           <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
@@ -2980,18 +3393,20 @@ export const AdminPage: React.FC = () => {
                                 {String(row[c.key] ?? '')}
                               </td>
                             ))}
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {row.updatedAt || '—'}
+                            </td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={() => void saveCatalogRowDoc(section, { ...row, pub: !row.pub })}
-                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
-                                  row.pub
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
-                                    : 'bg-slate-100 text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]'
-                                }`}
-                              >
-                                {row.pub ? t.common.published : t.common.draft}
-                              </button>
+                              <PublishToggleButton
+                                published={Boolean(row.pub)}
+                                onToggle={() =>
+                                  void saveCatalogRowDoc(
+                                    section,
+                                    { ...row, pub: !row.pub },
+                                    row.pub ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
                             </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
@@ -3023,7 +3438,13 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -3040,7 +3461,7 @@ export const AdminPage: React.FC = () => {
                 </div>
 
                 {slice.length === 0 ? (
-                  <EmptyState onReset={() => setSearchTerm('')} />
+                  <EmptyState onReset={resetFilters} />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
@@ -3048,7 +3469,9 @@ export const AdminPage: React.FC = () => {
                         <tr>
                           <th className="px-4 py-3">Report Name</th>
                           <th className="px-4 py-3">Period</th>
-                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Report State</th>
+                          <th className="px-4 py-3">Last updated</th>
+                          <th className="px-4 py-3">{t.common.status}</th>
                           <th className="px-4 py-3 text-right">{t.common.actions}</th>
                         </tr>
                       </thead>
@@ -3058,6 +3481,20 @@ export const AdminPage: React.FC = () => {
                             <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{String(row.name || '')}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{String(row.period || '')}</td>
                             <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">{String(row.status || '')}</td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {row.updatedAt || '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <PublishToggleButton
+                                published={Boolean(row.pub)}
+                                onToggle={() =>
+                                  void saveReportDoc(
+                                    { ...row, pub: !row.pub },
+                                    row.pub ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
+                            </td>
                             <td className="px-4 py-3 text-right">
                               <ActionButtons
                                 onEdit={() => setReportModal({ mode: 'edit', row: { ...row } })}
@@ -3078,8 +3515,8 @@ export const AdminPage: React.FC = () => {
             );
           })()}
 
-          {/* 15. ACTIVITY LOGS */}
-          {section === 'logs' && (() => {
+          {/* 15. ACTIVITY LOGS (SUPER ADMIN ONLY) */}
+          {section === 'logs' && isSuperAdmin && (() => {
             const { slice, totalPages, safePage, totalCount } = paginate(genericRows);
             return (
               <div className="space-y-4">
@@ -3087,15 +3524,15 @@ export const AdminPage: React.FC = () => {
                 {slice.length === 0 ? (
                   <EmptyState
                     title="No activity logs yet"
-                    subtitle="Every admin save, PDF upload, quiz edit, or deletion records an audit entry here."
-                    onReset={() => setSearchTerm('')}
+                    subtitle="Every admin create, update, publish, or delete records an append-only audit entry here."
+                    onReset={resetFilters}
                   />
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
                     <table className="w-full text-left text-sm">
                       <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
                         <tr>
-                          <th className="px-4 py-3">Timestamp</th>
+                          <th className="px-4 py-3">Timestamp (Server)</th>
                           <th className="px-4 py-3">Admin</th>
                           <th className="px-4 py-3">Action</th>
                         </tr>
@@ -3128,33 +3565,59 @@ export const AdminPage: React.FC = () => {
       {/* -------------------- MODALS -------------------- */}
 
       {/* Delete Modal */}
-      {deleteTarget && (
-        <ModalShell title={t.admin.deleteConfirmTitle} onClose={() => setDeleteTarget(null)}>
-          <p className="text-sm text-slate-600 dark:text-[#9fb0c8]">
-            This permanently removes the entry from Firebase Firestore.
-          </p>
-          <p className="mt-2 rounded-lg bg-slate-100 p-2.5 text-xs font-semibold text-slate-800 dark:bg-[#16294b] dark:text-slate-200">
-            {deleteTarget.label}
-          </p>
-          <div className="mt-5 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setDeleteTarget(null)}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-[#24385c] dark:text-slate-200"
-            >
-              {t.common.cancel}
-            </button>
-            <button
-              type="button"
-              disabled={savingBusy}
-              onClick={() => void confirmDelete()}
-              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
-            >
-              {savingBusy ? 'Deleting…' : t.common.delete}
-            </button>
-          </div>
-        </ModalShell>
-      )}
+      {deleteTarget && (() => {
+        const supportsUnpublishInstead =
+          deleteTarget.kind === 'qb' ||
+          deleteTarget.kind === 'quizzes' ||
+          deleteTarget.kind === 'mocks' ||
+          deleteTarget.kind === 'courses';
+        return (
+          <ModalShell title={t.admin.deleteConfirmTitle} onClose={() => setDeleteTarget(null)}>
+            <p className="text-sm text-slate-600 dark:text-[#9fb0c8]">
+              This permanently removes the entry from Firebase Firestore.
+              {supportsUnpublishInstead && deleteTarget.isPublished !== false
+                ? ' If you only want to hide it from students, you can unpublish it instead.'
+                : ''}
+            </p>
+            <p className="mt-2 rounded-lg bg-slate-100 p-2.5 text-xs font-semibold text-slate-800 dark:bg-[#16294b] dark:text-slate-200">
+              {deleteTarget.label}
+            </p>
+            {supportsUnpublishInstead && deleteTarget.isPublished === false && (
+              <p className="mt-2 text-xs font-medium text-slate-500 dark:text-[#9fb0c8]">
+                This item is already unpublished (Draft).
+              </p>
+            )}
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 dark:border-[#24385c] dark:text-slate-200"
+              >
+                {t.common.cancel}
+              </button>
+              {supportsUnpublishInstead && deleteTarget.isPublished !== false && (
+                <button
+                  type="button"
+                  disabled={savingBusy}
+                  onClick={() => void unpublishInsteadOfDelete()}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60"
+                >
+                  <EyeOff className="h-4 w-4" />
+                  <span>Unpublish instead</span>
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={savingBusy}
+                onClick={() => void confirmDelete()}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {savingBusy ? 'Deleting…' : t.common.delete}
+              </button>
+            </div>
+          </ModalShell>
+        );
+      })()}
 
       {/* Question Bank Modal */}
       {qbModal && (
@@ -3168,7 +3631,10 @@ export const AdminPage: React.FC = () => {
               if (!qbModal.item.question.trim()) return;
               setSavingBusy(true);
               try {
-                await saveQuestionDoc(qbModal.item);
+                await saveQuestionDoc(
+                  qbModal.item,
+                  qbModal.mode === 'add' ? 'create' : 'update'
+                );
                 setQbModal(null);
                 showToast('Question saved to Firebase!');
               } finally {
@@ -3476,7 +3942,20 @@ export const AdminPage: React.FC = () => {
       )}
 
       {/* Quiz / Mock Test Studio Modal (Bulk Paste + Question Bank) */}
-      {testModal && (
+      {testModal && (() => {
+        const modalQCount = Math.max(
+          1,
+          testModal.item.questionCount ??
+            (testModal.item.type === 'Daily Quiz'
+              ? 10
+              : testModal.item.type === 'Mock Test'
+                ? 50
+                : 20)
+        );
+        const modalMinutes = Math.max(0, Number(testModal.item.minutes) || 0);
+        const modalSecondsPerQ = (modalMinutes * 60) / modalQCount;
+        const minRecommendedMinutes = Math.ceil((modalQCount * 30) / 60);
+        return (
         <ModalShell
           title={
             testModal.mode === 'add'
@@ -3526,11 +4005,14 @@ export const AdminPage: React.FC = () => {
                   )
                 );
 
-                await saveTestDoc({
-                  ...testModal.item,
-                  subjectKeys: mergedSubjects.length ? mergedSubjects : ['gk'],
-                  questionIds: mergedIds,
-                });
+                await saveTestDoc(
+                  {
+                    ...testModal.item,
+                    subjectKeys: mergedSubjects.length ? mergedSubjects : ['gk'],
+                    questionIds: mergedIds,
+                  },
+                  testModal.mode === 'add' ? 'create' : 'update'
+                );
                 setTestModal(null);
                 showToast(
                   newlySavedIds.length > 0
@@ -3813,6 +4295,18 @@ export const AdminPage: React.FC = () => {
               </div>
             </div>
 
+            {modalSecondsPerQ < 30 && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div>
+                  <strong>Low time warning:</strong> Only{' '}
+                  <span className="font-mono-num font-bold">{Math.round(modalSecondsPerQ)}s</span>{' '}
+                  per question ({modalMinutes} min for {modalQCount} questions), which is under 30 seconds per question. Recommend at least{' '}
+                  <span className="font-mono-num font-bold">{minRecommendedMinutes} min</span>.
+                </div>
+              </div>
+            )}
+
             {/* Mode Switcher */}
             <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2 dark:border-[#24385c]">
               <button
@@ -3973,7 +4467,8 @@ export const AdminPage: React.FC = () => {
             </div>
           </form>
         </ModalShell>
-      )}
+        );
+      })()}
 
       {/* Study Material + PDF Upload Modal */}
       {materialModal && (
@@ -3987,7 +4482,10 @@ export const AdminPage: React.FC = () => {
               if (!materialModal.item.title.trim()) return;
               setSavingBusy(true);
               try {
-                await saveMaterialDoc(materialModal.item);
+                await saveMaterialDoc(
+                  materialModal.item,
+                  materialModal.mode === 'add' ? 'create' : 'update'
+                );
                 setMaterialModal(null);
                 showToast('Study material saved to Firebase!');
               } finally {
@@ -4195,7 +4693,10 @@ export const AdminPage: React.FC = () => {
                 .filter(Boolean);
               setSavingBusy(true);
               try {
-                await saveCourseDoc({ ...courseModal.item, lessons });
+                await saveCourseDoc(
+                  { ...courseModal.item, lessons },
+                  courseModal.mode === 'add' ? 'create' : 'update'
+                );
                 setCourseModal(null);
                 showToast('Course saved to Firebase!');
               } finally {
@@ -4269,7 +4770,7 @@ export const AdminPage: React.FC = () => {
       {/* Current Affairs Modal */}
       {affairModal && (
         <ModalShell
-          title={affairModal.mode === 'add' ? t.common.add : t.common.edit}
+          title={affairModal.mode === 'add' ? 'Add Current Affair' : 'Edit Current Affair'}
           onClose={() => setAffairModal(null)}
         >
           <form
@@ -4278,7 +4779,10 @@ export const AdminPage: React.FC = () => {
               if (!affairModal.item.title.trim()) return;
               setSavingBusy(true);
               try {
-                await saveAffairDoc(affairModal.item);
+                await saveAffairDoc(
+                  affairModal.item,
+                  affairModal.mode === 'add' ? 'create' : 'update'
+                );
                 setAffairModal(null);
                 showToast('Current affair saved to Firebase!');
               } finally {
@@ -4389,7 +4893,7 @@ export const AdminPage: React.FC = () => {
       {/* Job Update Modal */}
       {jobModal && (
         <ModalShell
-          title={jobModal.mode === 'add' ? t.common.add : t.common.edit}
+          title={jobModal.mode === 'add' ? 'Add Job Update' : 'Edit Job Update'}
           onClose={() => setJobModal(null)}
         >
           <form
@@ -4398,7 +4902,10 @@ export const AdminPage: React.FC = () => {
               if (!jobModal.item.title.trim()) return;
               setSavingBusy(true);
               try {
-                await saveJobDoc(jobModal.item);
+                await saveJobDoc(
+                  jobModal.item,
+                  jobModal.mode === 'add' ? 'create' : 'update'
+                );
                 setJobModal(null);
                 showToast('Job update saved to Firebase!');
               } finally {
@@ -4517,7 +5024,10 @@ export const AdminPage: React.FC = () => {
               }
               setSavingBusy(true);
               try {
-                await saveTypingPassageDoc(typingModal.item);
+                await saveTypingPassageDoc(
+                  typingModal.item,
+                  typingModal.mode === 'add' ? 'create' : 'update'
+                );
                 setTypingModal(null);
                 showToast('Typing passage saved to Firebase!');
               } finally {
@@ -4607,7 +5117,10 @@ export const AdminPage: React.FC = () => {
               if (!notifModal.item.title.trim()) return;
               setSavingBusy(true);
               try {
-                await saveNotificationDoc(notifModal.item);
+                await saveNotificationDoc(
+                  notifModal.item,
+                  notifModal.mode === 'add' ? 'create' : 'update'
+                );
                 setNotifModal(null);
                 showToast('Notification saved to Firebase!');
               } finally {
@@ -4698,7 +5211,7 @@ export const AdminPage: React.FC = () => {
       {/* Catalog Modal (Exams, Subjects, Categories, Site Settings) */}
       {catalogModal && (
         <ModalShell
-          title={catalogModal.mode === 'add' ? t.common.add : t.common.edit}
+          title={CATALOG_MODAL_LABELS[catalogModal.kind][catalogModal.mode]}
           onClose={() => setCatalogModal(null)}
         >
           <form
@@ -4706,7 +5219,11 @@ export const AdminPage: React.FC = () => {
               e.preventDefault();
               setSavingBusy(true);
               try {
-                await saveCatalogRowDoc(catalogModal.kind, catalogModal.row);
+                await saveCatalogRowDoc(
+                  catalogModal.kind,
+                  catalogModal.row,
+                  catalogModal.mode === 'add' ? 'create' : 'update'
+                );
                 setCatalogModal(null);
                 showToast('Saved to Firebase!');
               } finally {
@@ -4763,7 +5280,10 @@ export const AdminPage: React.FC = () => {
               e.preventDefault();
               setSavingBusy(true);
               try {
-                await saveReportDoc(reportModal.row);
+                await saveReportDoc(
+                  reportModal.row,
+                  reportModal.mode === 'add' ? 'create' : 'update'
+                );
                 setReportModal(null);
                 showToast('Report saved to Firebase!');
               } finally {
@@ -4927,6 +5447,76 @@ const SearchBar: React.FC<{ value: string; onChange: (val: string) => void }> = 
     </div>
   );
 };
+
+const StatusFilter: React.FC<{
+  value: 'all' | 'published' | 'draft';
+  onChange: (next: 'all' | 'published' | 'draft') => void;
+  publishedLabel?: string;
+  draftLabel?: string;
+}> = ({ value, onChange, publishedLabel = 'Published', draftLabel = 'Draft' }) => (
+  <div
+    role="group"
+    aria-label="Filter by status"
+    className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-[#24385c] dark:bg-[#122443]"
+  >
+    {(
+      [
+        { key: 'all', label: 'All' },
+        { key: 'draft', label: draftLabel },
+        { key: 'published', label: publishedLabel },
+      ] as const
+    ).map((opt) => {
+      const active = value === opt.key;
+      return (
+        <button
+          key={opt.key}
+          type="button"
+          onClick={() => onChange(opt.key)}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
+            active
+              ? 'bg-[#102544] text-white dark:bg-[#facc15] dark:text-[#102544]'
+              : 'text-slate-600 hover:bg-slate-100 dark:text-[#9fb0c8] dark:hover:bg-[#16294b]'
+          }`}
+        >
+          {opt.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
+const PublishToggleButton: React.FC<{
+  published: boolean;
+  onToggle: () => void;
+  publishedLabel?: string;
+  draftLabel?: string;
+}> = ({ published, onToggle, publishedLabel = 'Published', draftLabel = 'Draft' }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={published}
+    onClick={onToggle}
+    title={published ? `Click to switch to ${draftLabel}` : `Click to ${publishedLabel}`}
+    className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+      published
+        ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-950/80'
+        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-[#16294b] dark:text-[#9fb0c8] dark:hover:bg-[#1d345c]'
+    }`}
+  >
+    <span
+      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+        published ? 'bg-emerald-600' : 'bg-slate-400 dark:bg-slate-600'
+      }`}
+    >
+      <span
+        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+          published ? 'translate-x-3.5' : 'translate-x-0.5'
+        }`}
+      />
+    </span>
+    <span>{published ? publishedLabel : draftLabel}</span>
+  </button>
+);
 
 const ActionButtons: React.FC<{ onEdit: () => void; onDelete: () => void }> = ({
   onEdit,

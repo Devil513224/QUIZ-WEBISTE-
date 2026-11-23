@@ -28,6 +28,7 @@ export interface QuestionItem {
   explanation: string;
   language?: QuestionLanguage;
   published: boolean;
+  updatedAt?: string;
 }
 
 export interface TestDefinition {
@@ -44,6 +45,7 @@ export interface TestDefinition {
   questionLimit?: number;
   shuffle?: boolean;
   published?: boolean;
+  updatedAt?: string;
 }
 
 export interface PdfBrandingConfig {
@@ -87,6 +89,7 @@ export interface StudyMaterialItem {
   pdfUrl?: string;
   pdfDataUrl?: string;
   published: boolean;
+  updatedAt?: string;
 }
 
 export interface CourseItem {
@@ -95,6 +98,7 @@ export interface CourseItem {
   description: string;
   lessons: string[];
   published: boolean;
+  updatedAt?: string;
 }
 
 export interface CurrentAffairItem {
@@ -105,6 +109,7 @@ export interface CurrentAffairItem {
   date: string;
   summary: string;
   published: boolean;
+  updatedAt?: string;
 }
 
 export interface JobUpdateItem {
@@ -118,6 +123,7 @@ export interface JobUpdateItem {
   eligibility: string;
   officialLink?: string;
   published: boolean;
+  updatedAt?: string;
 }
 
 export interface NotificationItem {
@@ -129,6 +135,7 @@ export interface NotificationItem {
   audience: string;
   date: string;
   published?: boolean;
+  updatedAt?: string;
 }
 
 export interface BannerItem {
@@ -139,6 +146,7 @@ export interface BannerItem {
   bgColor: string;
   align: 'left' | 'center' | 'right';
   visible: boolean;
+  updatedAt?: string;
 }
 
 export interface HomepageSectionItem {
@@ -148,6 +156,7 @@ export interface HomepageSectionItem {
   heading: string;
   order?: number;
   visible: boolean;
+  updatedAt?: string;
 }
 
 export interface TypingPassageItem {
@@ -157,6 +166,7 @@ export interface TypingPassageItem {
   langLabel: string;
   text: string;
   published: boolean;
+  updatedAt?: string;
 }
 
 export const LOGO_URL = '/assets/aistudio/Learn_With_TG__Smart_Growth_Badge__1__04e13a98.png';

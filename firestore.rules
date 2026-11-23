@@ -58,6 +58,13 @@ service cloud.firestore {
       return !(field in data) || (data[field] is int || data[field] is float);
     }
 
+    function matchesSignedInWho(who) {
+      return isSignedIn() && (
+        ('email' in request.auth.token && request.auth.token.email is string && request.auth.token.email.size() > 0 && who == request.auth.token.email) ||
+        (!('email' in request.auth.token && request.auth.token.email is string && request.auth.token.email.size() > 0) && who == request.auth.uid)
+      );
+    }
+
     // Entity Validators
     function isValidUserAccount(data) {
       return data.keys().hasAll([
@@ -304,7 +311,7 @@ service cloud.firestore {
         && data.keys().hasOnly(['id', 'time', 'who', 'act', 'published', 'updatedAt'])
         && isValidId(data.id)
         && data.time is string && data.time.size() <= 40
-        && data.who is string && data.who.size() <= 160
+        && data.who is string && data.who.size() >= 1 && data.who.size() <= 160
         && data.act is string && data.act.size() >= 2 && data.act.size() <= 300
         && data.published is bool
         && data.updatedAt is timestamp;
@@ -561,14 +568,16 @@ service cloud.firestore {
     match /catalogRows/{rowId} {
       allow get: if isValidId(rowId) && (existing().published == true || isAdmin());
       allow list: if existing().published == true || isAdmin();
-      allow create: if isValidId(rowId) && isAdmin() && isValidCatalogRow(incoming()) && incoming().updatedAt == request.time;
-      allow update: if isValidId(rowId) && isAdmin() && isValidCatalogRow(incoming())
+      allow create: if isValidId(rowId) && isValidCatalogRow(incoming()) && incoming().updatedAt == request.time
+        && (isSuperAdmin() || (isAdmin() && incoming().kind != 'sitesettings'));
+      allow update: if isValidId(rowId) && isValidCatalogRow(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['kind', 'col1', 'col2', 'col3', 'published', 'updatedAt']);
-      allow delete: if isValidId(rowId) && isAdmin();
+        && incoming().diff(existing()).affectedKeys().hasOnly(['kind', 'col1', 'col2', 'col3', 'published', 'updatedAt'])
+        && (isSuperAdmin() || (isAdmin() && existing().kind != 'sitesettings' && incoming().kind != 'sitesettings'));
+      allow delete: if isValidId(rowId) && (isSuperAdmin() || (isAdmin() && existing().kind != 'sitesettings'));
     }
 
-    // Admin-only Reports & Activity Logs
+    // Admin-only Reports & Super Admin Activity Logs (Append-only)
     match /reports/{reportId} {
       allow get: if isValidId(reportId) && isAdmin();
       allow list: if isAdmin();
@@ -580,41 +589,42 @@ service cloud.firestore {
     }
 
     match /activityLogs/{logId} {
-      allow get: if isValidId(logId) && isAdmin();
-      allow list: if isAdmin();
-      allow create: if isValidId(logId) && isAdmin() && isValidActivityLog(incoming()) && incoming().updatedAt == request.time;
-      allow update: if isValidId(logId) && isAdmin() && isValidActivityLog(incoming())
-        && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['time', 'who', 'act', 'published', 'updatedAt']);
-      allow delete: if isValidId(logId) && isAdmin();
+      allow get: if isValidId(logId) && isSuperAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(logId) && isAdmin()
+        && isValidActivityLog(incoming())
+        && matchesSignedInWho(incoming().who)
+        && incoming().updatedAt == request.time;
+      allow update: if false;
+      allow delete: if false;
     }
 
     match /siteBranding/{docId} {
       allow get: if isValidId(docId) && (existing().published == true || isAdmin());
       allow list: if existing().published == true || isAdmin();
-      allow create: if isValidId(docId) && isAdmin() && isValidSiteBranding(incoming()) && incoming().updatedAt == request.time;
-      allow update: if isValidId(docId) && isAdmin() && isValidSiteBranding(incoming())
+      allow create: if isValidId(docId) && isSuperAdmin() && isValidSiteBranding(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isSuperAdmin() && isValidSiteBranding(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'brandName', 'tagline', 'footerNote', 'logoUrl', 'logoDataUrl', 'accentColor',
           'watermarkMode', 'watermarkText', 'watermarkColor', 'watermarkOpacity',
           'watermarkLogoUrl', 'watermarkLogoDataUrl', 'published', 'updatedAt'
         ]);
-      allow delete: if isValidId(docId) && isAdmin();
+      allow delete: if isValidId(docId) && isSuperAdmin();
     }
 
     match /siteCommunity/{docId} {
       allow get: if isValidId(docId) && (existing().published == true || isAdmin());
       allow list: if existing().published == true || isAdmin();
-      allow create: if isValidId(docId) && isAdmin() && isValidSiteCommunity(incoming()) && incoming().updatedAt == request.time;
-      allow update: if isValidId(docId) && isAdmin() && isValidSiteCommunity(incoming())
+      allow create: if isValidId(docId) && isSuperAdmin() && isValidSiteCommunity(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isSuperAdmin() && isValidSiteCommunity(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'youtubeUrl', 'telegramUrl', 'instagramUrl', 'whatsappUrl',
           'facebookUrl', 'twitterUrl', 'popupEnabled', 'popupTitle', 'popupSubtitle',
           'popupHighlight', 'published', 'updatedAt'
         ]);
-      allow delete: if isValidId(docId) && isAdmin();
+      allow delete: if isValidId(docId) && isSuperAdmin();
     }
   }
 }

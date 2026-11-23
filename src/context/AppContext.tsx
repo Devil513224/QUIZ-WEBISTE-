@@ -13,6 +13,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDoc,
   onSnapshot,
   query,
@@ -102,7 +103,45 @@ export interface UserProfile {
 export interface GenericRow {
   id: string;
   pub: boolean;
-  [key: string]: string | boolean;
+  updatedAt?: string;
+  updatedAtMs?: number;
+  [key: string]: string | number | boolean | undefined;
+}
+
+export type AdminActionHint = 'create' | 'update' | 'publish' | 'unpublish';
+
+export interface DashboardCollectionStat {
+  key: string;
+  label: string;
+  total: number;
+  published: number;
+  draft: number;
+}
+
+export interface DashboardCountsData {
+  studentsTotal: number;
+  studentsActive: number;
+  studentsSuspended: number;
+  testsTotal: number;
+  testsPublished: number;
+  questionsTotal: number;
+  questionsPublished: number;
+  materialsTotal: number;
+  materialsPublished: number;
+  bannersTotal: number;
+  bannersPublished: number;
+  coursesTotal: number;
+  coursesPublished: number;
+  affairsTotal: number;
+  affairsPublished: number;
+  jobsTotal: number;
+  jobsPublished: number;
+  typingTotal: number;
+  typingPublished: number;
+  notificationsTotal: number;
+  notificationsPublished: number;
+  logsTotal?: number;
+  chartData: DashboardCollectionStat[];
 }
 
 export interface PersistedState {
@@ -283,37 +322,44 @@ interface AppContextValue {
   unreadNotificationsCount: number;
   updateProfile: (profile: UserProfile) => Promise<void>;
   // Firestore Admin CRUD actions
-  saveQuestionDoc: (item: QuestionItem) => Promise<void>;
+  saveQuestionDoc: (item: QuestionItem, actionHint?: AdminActionHint) => Promise<void>;
   saveQuestionsBatchDoc: (items: QuestionItem[]) => Promise<string[]>;
   deleteQuestionDoc: (id: string) => Promise<void>;
-  saveTestDoc: (item: TestDefinition) => Promise<void>;
+  saveTestDoc: (item: TestDefinition, actionHint?: AdminActionHint) => Promise<void>;
   deleteTestDoc: (id: string) => Promise<void>;
-  saveMaterialDoc: (item: StudyMaterialItem) => Promise<void>;
+  saveMaterialDoc: (item: StudyMaterialItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteMaterialDoc: (id: string) => Promise<void>;
-  saveCourseDoc: (item: CourseItem) => Promise<void>;
+  saveCourseDoc: (item: CourseItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteCourseDoc: (id: string) => Promise<void>;
-  saveAffairDoc: (item: CurrentAffairItem) => Promise<void>;
+  saveAffairDoc: (item: CurrentAffairItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteAffairDoc: (id: string) => Promise<void>;
-  saveJobDoc: (item: JobUpdateItem) => Promise<void>;
+  saveJobDoc: (item: JobUpdateItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteJobDoc: (id: string) => Promise<void>;
-  saveBannerDoc: (item: BannerItem) => Promise<void>;
+  saveBannerDoc: (item: BannerItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteBannerDoc: (id: string) => Promise<void>;
-  saveHomepageSectionDoc: (item: HomepageSectionItem, order: number) => Promise<void>;
-  saveHomepageSectionsOrder: (items: HomepageSectionItem[]) => Promise<void>;
-  saveNotificationDoc: (item: NotificationItem) => Promise<void>;
+  saveHomepageSectionDoc: (
+    item: HomepageSectionItem,
+    order: number,
+    actionHint?: AdminActionHint
+  ) => Promise<void>;
+  saveHomepageSectionsOrder: (items: HomepageSectionItem[], customLog?: string) => Promise<void>;
+  saveNotificationDoc: (item: NotificationItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteNotificationDoc: (docId: string) => Promise<void>;
-  saveTypingPassageDoc: (item: TypingPassageItem) => Promise<void>;
+  saveTypingPassageDoc: (item: TypingPassageItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteTypingPassageDoc: (id: string) => Promise<void>;
   saveCatalogRowDoc: (
     kind: 'exams' | 'subjects' | 'categories' | 'sitesettings',
-    row: GenericRow
+    row: GenericRow,
+    actionHint?: AdminActionHint
   ) => Promise<void>;
   deleteCatalogRowDoc: (id: string) => Promise<void>;
-  saveReportDoc: (row: GenericRow) => Promise<void>;
+  saveReportDoc: (row: GenericRow, actionHint?: AdminActionHint) => Promise<void>;
   deleteReportDoc: (id: string) => Promise<void>;
   savePdfBrandingDoc: (config: PdfBrandingConfig) => Promise<void>;
   saveCommunityConfigDoc: (config: SiteCommunityConfig) => Promise<void>;
   toggleStudentStatusDoc: (uid: string, nextStatus: 'Active' | 'Suspended') => Promise<void>;
+  updateUserRoleDoc: (uid: string, nextRole: UserRole) => Promise<void>;
+  fetchDashboardCounts: () => Promise<DashboardCountsData>;
   seedFirestoreCatalog: (silent?: boolean) => Promise<void>;
   resetDemoState: () => void;
 }
@@ -323,6 +369,46 @@ const AppContext = createContext<AppContextValue | null>(null);
 const cleanId = (raw: string, fallbackPrefix: string) => {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
   return cleaned || `${fallbackPrefix}_${Date.now()}`;
+};
+
+const extractTimestampInfo = (val: unknown): { formatted: string; ms: number } => {
+  if (!val) return { formatted: '—', ms: 0 };
+  let date: Date | null = null;
+  if (typeof val === 'string') {
+    const parsed = new Date(val);
+    if (!Number.isNaN(parsed.getTime())) date = parsed;
+    else return { formatted: val, ms: 0 };
+  } else if (typeof val === 'number') {
+    date = new Date(val);
+  } else {
+    const ts = val as { toDate?: () => Date; seconds?: number };
+    if (typeof ts.toDate === 'function') {
+      date = ts.toDate();
+    } else if (typeof ts.seconds === 'number') {
+      date = new Date(ts.seconds * 1000);
+    }
+  }
+  if (!date || Number.isNaN(date.getTime())) return { formatted: '—', ms: 0 };
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatted = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return { formatted, ms: date.getTime() };
+};
+
+const describeAdminAction = (
+  hint: AdminActionHint | undefined,
+  existsInList: boolean,
+  entityLabel: string,
+  title: string
+) => {
+  const verb =
+    hint === 'publish'
+      ? 'Published'
+      : hint === 'unpublish'
+        ? 'Unpublished'
+        : hint === 'create' || (!hint && !existsInList)
+          ? 'Created'
+          : 'Updated';
+  return `${verb} ${entityLabel}: ${title}`;
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -749,13 +835,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (snap) => {
           if (snap.empty) return;
           const list = snap.docs.map((d) => {
-            const data = d.data() as QuestionItem;
+            const data = d.data() as QuestionItem & { updatedAt?: unknown };
             const rawLang = data.language;
             const language: QuestionLanguage =
               rawLang === 'Bengali' || rawLang === 'Hindi' ? rawLang : 'English';
             return {
               ...data,
               language,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
             };
           });
           setState((prev) => ({ ...prev, questions: list }));
@@ -771,7 +858,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (snap) => {
           if (snap.empty) return;
           const list = snap.docs.map((d) => {
-            const data = d.data() as TestDefinition;
+            const data = d.data() as TestDefinition & { updatedAt?: unknown };
             return {
               ...data,
               examIds: Array.isArray(data.examIds) ? data.examIds : [],
@@ -783,6 +870,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     ? data.questionLimit
                     : undefined,
               shuffle: Boolean(data.shuffle ?? data.type === 'Daily Quiz'),
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
             };
           });
           setState((prev) => ({ ...prev, tests: list }));
@@ -871,7 +959,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('materials'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as StudyMaterialItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as StudyMaterialItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, materials: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'materials')
@@ -884,7 +978,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('courses'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as CourseItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as CourseItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, courses: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'courses')
@@ -897,7 +997,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('affairs'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as CurrentAffairItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as CurrentAffairItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, affairs: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'affairs')
@@ -910,7 +1016,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('jobs'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as JobUpdateItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as JobUpdateItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, jobs: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'jobs')
@@ -923,7 +1035,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('banners', 'visible'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as BannerItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as BannerItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, banners: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'banners')
@@ -937,7 +1055,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (snap) => {
           if (snap.empty) return;
           const list = snap.docs
-            .map((d) => d.data() as HomepageSectionItem)
+            .map((d) => {
+              const data = d.data() as HomepageSectionItem & { updatedAt?: unknown };
+              return {
+                ...data,
+                updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+              };
+            })
             .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
           setState((prev) => ({ ...prev, homepageSections: list }));
         },
@@ -963,6 +1087,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 audience: String(data.audience || 'All students'),
                 date: String(data.date || ''),
                 published: Boolean(data.published),
+                updatedAt: extractTimestampInfo(data.updatedAt).formatted,
               } as NotificationItem;
             })
             .sort((a, b) => b.id - a.id);
@@ -978,7 +1103,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         makePublicOrAdminQuery('typingPassages'),
         (snap) => {
           if (snap.empty) return;
-          const list = snap.docs.map((d) => d.data() as TypingPassageItem);
+          const list = snap.docs.map((d) => {
+            const data = d.data() as TypingPassageItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
           setState((prev) => ({ ...prev, typingPassages: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'typingPassages')
@@ -999,12 +1130,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           snap.docs.forEach((d) => {
             const data = d.data();
             const kind = String(data.kind);
+            const updatedAt = extractTimestampInfo(data.updatedAt).formatted;
             if (kind === 'exams') {
               exams.push({
                 id: d.id,
                 name: String(data.col1 || ''),
                 cat: String(data.col2 || ''),
                 pub: Boolean(data.published),
+                updatedAt,
               });
             } else if (kind === 'subjects') {
               subjects.push({
@@ -1012,6 +1145,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 name: String(data.col1 || ''),
                 desc: String(data.col2 || ''),
                 pub: Boolean(data.published),
+                updatedAt,
               });
             } else if (kind === 'categories') {
               categories.push({
@@ -1019,6 +1153,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 name: String(data.col1 || ''),
                 desc: String(data.col2 || ''),
                 pub: Boolean(data.published),
+                updatedAt,
               });
             } else if (kind === 'sitesettings') {
               sitesettings.push({
@@ -1026,6 +1161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 key: String(data.col1 || ''),
                 val: String(data.col2 || ''),
                 pub: Boolean(data.published),
+                updatedAt,
               });
             }
           });
@@ -1062,6 +1198,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 status: String(data.status || 'Active'),
                 points: String(data.points ?? 0),
                 pub: data.status === 'Active',
+                updatedAt: extractTimestampInfo(data.updatedAt).formatted,
               };
             });
             setState((prev) => ({
@@ -1086,6 +1223,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 period: String(data.period || ''),
                 status: String(data.status || ''),
                 pub: Boolean(data.published),
+                updatedAt: extractTimestampInfo(data.updatedAt).formatted,
               };
             });
             setState((prev) => ({
@@ -1096,7 +1234,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           (err) => handleFirestoreError(err, OperationType.LIST, 'reports')
         )
       );
+    }
 
+    // Super Admin-only Activity Logs
+    if (isSuperAdmin) {
       unsubs.push(
         onSnapshot(
           collection(db, 'activityLogs'),
@@ -1104,15 +1245,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const rows: GenericRow[] = snap.docs
               .map((d) => {
                 const data = d.data();
+                const ts = extractTimestampInfo(data.updatedAt);
                 return {
                   id: d.id,
-                  time: String(data.time || ''),
+                  time: ts.ms > 0 ? ts.formatted : String(data.time || 'Pending…'),
                   who: String(data.who || ''),
                   act: String(data.act || ''),
                   pub: Boolean(data.published),
+                  updatedAt: ts.formatted,
+                  updatedAtMs: ts.ms,
                 };
               })
-              .sort((a, b) => String(b.time).localeCompare(String(a.time)));
+              .sort((a, b) => {
+                const diff = (b.updatedAtMs || 0) - (a.updatedAtMs || 0);
+                if (diff !== 0) return diff;
+                return String(b.time).localeCompare(String(a.time));
+              });
             setState((prev) => ({
               ...prev,
               adminTables: { ...prev.adminTables, logs: rows },
@@ -1121,12 +1269,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           (err) => handleFirestoreError(err, OperationType.LIST, 'activityLogs')
         )
       );
+    } else {
+      setState((prev) =>
+        prev.adminTables.logs?.length
+          ? { ...prev, adminTables: { ...prev.adminTables, logs: [] } }
+          : prev
+      );
     }
 
     return () => {
       unsubs.forEach((fn) => fn());
     };
-  }, [authReady, isAdmin]);
+  }, [authReady, isAdmin, isSuperAdmin]);
 
   // Persist user progress to Firestore when signed in
   const persistProgressToFirestore = useCallback(async (nextState: PersistedState) => {
@@ -1373,11 +1527,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   /* -------------------- Admin Firestore CRUD Helpers -------------------- */
-  const saveQuestionDoc = async (item: QuestionItem) => {
+  const saveQuestionDoc = async (item: QuestionItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'q');
     const path = `questions/${id}`;
     const lang: QuestionLanguage =
       item.language === 'Bengali' || item.language === 'Hindi' ? item.language : 'English';
+    const exists = state.questions.some((q) => q.id === id);
     try {
       await setDoc(doc(db, 'questions', id), {
         id,
@@ -1391,7 +1546,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved question: ${item.question.slice(0, 60)}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'question', item.question.slice(0, 60))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1425,7 +1582,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         await batch.commit();
       }
-      await logAdminActivity(`Bulk imported ${savedIds.length} MCQ question(s)`);
+      await logAdminActivity(`Created ${savedIds.length} bulk MCQ question(s)`);
       return savedIds;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'questions');
@@ -1442,7 +1599,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveTestDoc = async (item: TestDefinition) => {
+  const saveTestDoc = async (item: TestDefinition, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'tst');
     const path = `tests/${id}`;
     const defaultCount =
@@ -1451,6 +1608,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       1,
       Math.min(500, Number(item.questionCount ?? item.questionLimit) || defaultCount)
     );
+    const exists = state.tests.some((tItem) => tItem.id === id);
     try {
       const payload: Record<string, unknown> = {
         id,
@@ -1468,7 +1626,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       if (item.note) payload.note = item.note.slice(0, 400);
       await setDoc(doc(db, 'tests', id), payload);
-      await logAdminActivity(`Saved ${item.type}: ${item.name}`);
+      await logAdminActivity(describeAdminAction(actionHint, exists, item.type, item.name));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1554,9 +1712,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveMaterialDoc = async (item: StudyMaterialItem) => {
+  const saveMaterialDoc = async (item: StudyMaterialItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'mat');
     const path = `materials/${id}`;
+    const exists = state.materials.some((m) => m.id === id);
     try {
       const payload: Record<string, unknown> = {
         id,
@@ -1572,7 +1731,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (item.pdfUrl) payload.pdfUrl = item.pdfUrl.slice(0, 2048);
       if (item.pdfDataUrl) payload.pdfDataUrl = item.pdfDataUrl.slice(0, 920000);
       await setDoc(doc(db, 'materials', id), payload);
-      await logAdminActivity(`Saved study material: ${item.title}`);
+      await logAdminActivity(describeAdminAction(actionHint, exists, 'study material', item.title));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1588,9 +1747,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveCourseDoc = async (item: CourseItem) => {
+  const saveCourseDoc = async (item: CourseItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'crs');
     const path = `courses/${id}`;
+    const exists = state.courses.some((c) => c.id === id);
     try {
       await setDoc(doc(db, 'courses', id), {
         id,
@@ -1600,7 +1760,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved course: ${item.title}`);
+      await logAdminActivity(describeAdminAction(actionHint, exists, 'course', item.title));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1616,9 +1776,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveAffairDoc = async (item: CurrentAffairItem) => {
+  const saveAffairDoc = async (item: CurrentAffairItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'ca');
     const path = `affairs/${id}`;
+    const exists = state.affairs.some((a) => a.id === id);
     try {
       await setDoc(doc(db, 'affairs', id), {
         id,
@@ -1630,7 +1791,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved current affair: ${item.title.slice(0, 50)}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'current affair', item.title.slice(0, 60))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1646,9 +1809,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveJobDoc = async (item: JobUpdateItem) => {
+  const saveJobDoc = async (item: JobUpdateItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'job');
     const path = `jobs/${id}`;
+    const exists = state.jobs.some((j) => j.id === id);
     try {
       const payload: Record<string, unknown> = {
         id,
@@ -1664,7 +1828,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       if (item.officialLink) payload.officialLink = item.officialLink.slice(0, 1024);
       await setDoc(doc(db, 'jobs', id), payload);
-      await logAdminActivity(`Saved job update: ${item.title.slice(0, 50)}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'job update', item.title.slice(0, 60))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1680,9 +1846,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveBannerDoc = async (item: BannerItem) => {
+  const saveBannerDoc = async (item: BannerItem, actionHint?: AdminActionHint) => {
     const id = cleanId(item.id, 'ban');
     const path = `banners/${id}`;
+    const exists = state.banners.some((b) => b.id === id);
     try {
       await setDoc(doc(db, 'banners', id), {
         id,
@@ -1694,6 +1861,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         visible: Boolean(item.visible),
         updatedAt: serverTimestamp(),
       });
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'banner', item.title.slice(0, 60))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1709,9 +1879,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveHomepageSectionDoc = async (item: HomepageSectionItem, order: number) => {
+  const saveHomepageSectionDoc = async (
+    item: HomepageSectionItem,
+    order: number,
+    actionHint?: AdminActionHint
+  ) => {
     const id = cleanId(item.id, 'hb');
     const path = `homepageSections/${id}`;
+    const exists = state.homepageSections.some((s) => s.id === id);
     try {
       await setDoc(doc(db, 'homepageSections', id), {
         id,
@@ -1722,12 +1897,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         visible: Boolean(item.visible),
         updatedAt: serverTimestamp(),
       });
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'homepage section', item.name)
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
   };
 
-  const saveHomepageSectionsOrder = async (items: HomepageSectionItem[]) => {
+  const saveHomepageSectionsOrder = async (
+    items: HomepageSectionItem[],
+    customLog?: string
+  ) => {
     const batch = writeBatch(db);
     items.forEach((sec, idx) => {
       const id = cleanId(sec.id, 'hb');
@@ -1743,15 +1924,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     try {
       await batch.commit();
-      await logAdminActivity('Updated homepage section order & visibility');
+      await logAdminActivity(customLog || 'Updated homepage section order & visibility');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'homepageSections');
     }
   };
 
-  const saveNotificationDoc = async (item: NotificationItem) => {
+  const saveNotificationDoc = async (
+    item: NotificationItem,
+    actionHint?: AdminActionHint
+  ) => {
     const docId = cleanId(item.docId || `nt_${item.id}`, 'nt');
     const path = `notifications/${docId}`;
+    const exists = state.notificationsList.some(
+      (n) => (n.docId || `nt_${n.id}`) === docId
+    );
     try {
       await setDoc(doc(db, 'notifications', docId), {
         id: docId,
@@ -1764,7 +1951,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: item.published ?? true,
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved notification: ${item.title.slice(0, 50)}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'notification', item.title.slice(0, 60))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1780,9 +1969,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveTypingPassageDoc = async (item: TypingPassageItem) => {
+  const saveTypingPassageDoc = async (
+    item: TypingPassageItem,
+    actionHint?: AdminActionHint
+  ) => {
     const id = cleanId(item.id, 'tp');
     const path = `typingPassages/${id}`;
+    const exists = state.typingPassages.some((tp) => tp.id === id);
     try {
       await setDoc(doc(db, 'typingPassages', id), {
         id,
@@ -1793,7 +1986,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved typing passage: ${item.title}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'typing passage', item.title)
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1811,7 +2006,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveCatalogRowDoc = async (
     kind: 'exams' | 'subjects' | 'categories' | 'sitesettings',
-    row: GenericRow
+    row: GenericRow,
+    actionHint?: AdminActionHint
   ) => {
     const id = cleanId(row.id, kind);
     const path = `catalogRows/${id}`;
@@ -1823,6 +2019,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : kind === 'sitesettings'
           ? String(row.val || '')
           : String(row.desc || '');
+    const exists = (state.adminTables[kind] || []).some((r) => r.id === id);
+    const kindLabel =
+      kind === 'exams'
+        ? 'exam'
+        : kind === 'subjects'
+          ? 'subject'
+          : kind === 'categories'
+            ? 'category'
+            : 'site setting';
     try {
       await setDoc(doc(db, 'catalogRows', id), {
         id,
@@ -1833,7 +2038,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(row.pub),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved ${kind} row: ${col1}`);
+      await logAdminActivity(describeAdminAction(actionHint, exists, kindLabel, col1));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1849,9 +2054,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const saveReportDoc = async (row: GenericRow) => {
+  const saveReportDoc = async (row: GenericRow, actionHint?: AdminActionHint) => {
     const id = cleanId(row.id, 'rp');
     const path = `reports/${id}`;
+    const exists = (state.adminTables.reports || []).some((r) => r.id === id);
     try {
       await setDoc(doc(db, 'reports', id), {
         id,
@@ -1861,7 +2067,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         published: Boolean(row.pub),
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Saved report: ${String(row.name || '')}`);
+      await logAdminActivity(
+        describeAdminAction(actionHint, exists, 'report', String(row.name || id))
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
     }
@@ -1871,6 +2079,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const path = `reports/${id}`;
     try {
       await deleteDoc(doc(db, 'reports', id));
+      await logAdminActivity(`Deleted report: ${id}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1883,11 +2092,184 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Changed student ${uid} status to ${nextStatus}`);
+      await logAdminActivity(`Updated student ${uid} status to ${nextStatus}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
+
+  const updateUserRoleDoc = async (uid: string, nextRole: UserRole) => {
+    if (!isSuperAdmin) {
+      throw new Error('Only Super Admin can change user roles.');
+    }
+    if (auth?.currentUser?.uid === uid) {
+      throw new Error('You cannot change your own role.');
+    }
+    const path = `users/${uid}`;
+    try {
+      await updateDoc(doc(db, 'users', uid), {
+        role: nextRole,
+        updatedAt: serverTimestamp(),
+      });
+      await logAdminActivity(`Updated user ${uid} role to ${nextRole}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
+  const fetchDashboardCounts = useCallback(async (): Promise<DashboardCountsData> => {
+    const buildLocalFallback = (): DashboardCountsData => {
+      const students = state.adminTables.students || [];
+      const studentsActive = students.filter((s) => s.status === 'Active').length;
+      const testsPublished = state.tests.filter((x) => x.published !== false).length;
+      const questionsPublished = state.questions.filter((x) => x.published).length;
+      const materialsPublished = state.materials.filter((x) => x.published).length;
+      const coursesPublished = state.courses.filter((x) => x.published).length;
+      const affairsPublished = state.affairs.filter((x) => x.published).length;
+      const jobsPublished = state.jobs.filter((x) => x.published).length;
+      const typingPublished = state.typingPassages.filter((x) => x.published).length;
+      const notificationsPublished = state.notificationsList.filter((x) => x.published !== false).length;
+      const bannersPublished = state.banners.filter((x) => x.visible).length;
+
+      const makeStat = (key: string, label: string, total: number, published: number): DashboardCollectionStat => ({
+        key,
+        label,
+        total,
+        published,
+        draft: Math.max(0, total - published),
+      });
+
+      return {
+        studentsTotal: students.length,
+        studentsActive,
+        studentsSuspended: Math.max(0, students.length - studentsActive),
+        testsTotal: state.tests.length,
+        testsPublished,
+        questionsTotal: state.questions.length,
+        questionsPublished,
+        materialsTotal: state.materials.length,
+        materialsPublished,
+        bannersTotal: state.banners.length,
+        bannersPublished,
+        coursesTotal: state.courses.length,
+        coursesPublished,
+        affairsTotal: state.affairs.length,
+        affairsPublished,
+        jobsTotal: state.jobs.length,
+        jobsPublished,
+        typingTotal: state.typingPassages.length,
+        typingPublished,
+        notificationsTotal: state.notificationsList.length,
+        notificationsPublished,
+        logsTotal: isSuperAdmin ? (state.adminTables.logs || []).length : undefined,
+        chartData: [
+          makeStat('questions', 'Questions', state.questions.length, questionsPublished),
+          makeStat('tests', 'Tests', state.tests.length, testsPublished),
+          makeStat('materials', 'PDFs', state.materials.length, materialsPublished),
+          makeStat('courses', 'Courses', state.courses.length, coursesPublished),
+          makeStat('affairs', 'Affairs', state.affairs.length, affairsPublished),
+          makeStat('jobs', 'Jobs', state.jobs.length, jobsPublished),
+          makeStat('typingPassages', 'Typing', state.typingPassages.length, typingPublished),
+          makeStat('notifications', 'Notices', state.notificationsList.length, notificationsPublished),
+          makeStat('banners', 'Banners', state.banners.length, bannersPublished),
+        ],
+      };
+    };
+
+    if (!isFirebaseConfigured || !db || !auth?.currentUser) {
+      return buildLocalFallback();
+    }
+
+    const countPair = async (colName: string, field = 'published', value: unknown = true) => {
+      const colRef = collection(db, colName);
+      const [totalSnap, pubSnap] = await Promise.all([
+        getCountFromServer(colRef),
+        getCountFromServer(query(colRef, where(field, '==', value))),
+      ]);
+      return {
+        total: totalSnap.data().count,
+        published: pubSnap.data().count,
+      };
+    };
+
+    try {
+      const [
+        usersRes,
+        questionsRes,
+        testsRes,
+        materialsRes,
+        coursesRes,
+        affairsRes,
+        jobsRes,
+        typingRes,
+        notificationsRes,
+        bannersRes,
+        logsSnap,
+      ] = await Promise.all([
+        countPair('users', 'status', 'Active'),
+        countPair('questions'),
+        countPair('tests'),
+        countPair('materials'),
+        countPair('courses'),
+        countPair('affairs'),
+        countPair('jobs'),
+        countPair('typingPassages'),
+        countPair('notifications'),
+        countPair('banners', 'visible', true),
+        isSuperAdmin ? getCountFromServer(collection(db, 'activityLogs')) : Promise.resolve(null),
+      ]);
+
+      const makeStat = (
+        key: string,
+        label: string,
+        res: { total: number; published: number }
+      ): DashboardCollectionStat => ({
+        key,
+        label,
+        total: res.total,
+        published: res.published,
+        draft: Math.max(0, res.total - res.published),
+      });
+
+      return {
+        studentsTotal: usersRes.total,
+        studentsActive: usersRes.published,
+        studentsSuspended: Math.max(0, usersRes.total - usersRes.published),
+        testsTotal: testsRes.total,
+        testsPublished: testsRes.published,
+        questionsTotal: questionsRes.total,
+        questionsPublished: questionsRes.published,
+        materialsTotal: materialsRes.total,
+        materialsPublished: materialsRes.published,
+        bannersTotal: bannersRes.total,
+        bannersPublished: bannersRes.published,
+        coursesTotal: coursesRes.total,
+        coursesPublished: coursesRes.published,
+        affairsTotal: affairsRes.total,
+        affairsPublished: affairsRes.published,
+        jobsTotal: jobsRes.total,
+        jobsPublished: jobsRes.published,
+        typingTotal: typingRes.total,
+        typingPublished: typingRes.published,
+        notificationsTotal: notificationsRes.total,
+        notificationsPublished: notificationsRes.published,
+        logsTotal: logsSnap ? logsSnap.data().count : undefined,
+        chartData: [
+          makeStat('questions', 'Questions', questionsRes),
+          makeStat('tests', 'Tests', testsRes),
+          makeStat('materials', 'PDFs', materialsRes),
+          makeStat('courses', 'Courses', coursesRes),
+          makeStat('affairs', 'Affairs', affairsRes),
+          makeStat('jobs', 'Jobs', jobsRes),
+          makeStat('typingPassages', 'Typing', typingRes),
+          makeStat('notifications', 'Notices', notificationsRes),
+          makeStat('banners', 'Banners', bannersRes),
+        ],
+      };
+    } catch {
+      return buildLocalFallback();
+    }
+  }, [isSuperAdmin, state]);
 
   const resetDemoState = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -1956,6 +2338,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         savePdfBrandingDoc,
         saveCommunityConfigDoc,
         toggleStudentStatusDoc,
+        updateUserRoleDoc,
+        fetchDashboardCounts,
         seedFirestoreCatalog,
         resetDemoState,
       }}
