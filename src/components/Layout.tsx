@@ -18,6 +18,8 @@ import {
   SESSION_POPUP_KEY,
   WelcomeNotificationPopup,
 } from './SocialCommunity';
+import { OfflineIndicator, PWAInstallButton } from './PWAInstall';
+import { SeoHead } from './SeoHead';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
@@ -115,7 +117,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   if (isAdminRoute) {
     return (
       <div className="min-h-screen bg-[#f8fafc] text-[#0f172a] dark:bg-[#0b1730] dark:text-[#f1f5f9]">
+        <SeoHead />
         {children}
+        <OfflineIndicator />
         {toastMessage && (
           <div
             role="status"
@@ -130,6 +134,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="flex min-h-screen flex-col overflow-x-clip bg-[#f8fafc] text-[#0f172a] dark:bg-[#0b1730] dark:text-[#f1f5f9]">
+      <SeoHead />
       {/* Announcement Bar */}
       <div className="bg-[#102544] px-3 py-2 text-center text-[11px] leading-snug text-white sm:px-4 sm:text-sm">
         <span className="font-bold text-[#facc15]">{t.brand.freeBannerPrefix}</span>{' '}
@@ -257,6 +262,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               )}
             </Link>
 
+            <PWAInstallButton variant="header" />
+
             <Link
               to="/account"
               className="hidden h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#1b3a6b] sm:inline-flex dark:bg-[#facc15] dark:text-[#102544] dark:hover:brightness-95"
@@ -364,7 +371,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 </Link>
               ))}
             </nav>
-            <div className="border-t border-slate-200 pt-4 dark:border-[#24385c]">
+            <div className="space-y-2 border-t border-slate-200 pt-4 dark:border-[#24385c]">
+              <PWAInstallButton variant="drawer" />
               <Link
                 to="/account"
                 className="flex w-full items-center justify-center rounded-lg bg-[#facc15] px-4 py-2.5 text-sm font-bold text-[#102544]"
@@ -436,15 +444,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
           <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-[#24385c] pt-6 text-xs text-slate-400">
             <span>{t.footer.copyright}</span>
-            <span className="inline-flex items-center gap-2 font-mono-num text-slate-300">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-              <span>{liveVisitorCount} live online · {totalVisitorCount.toLocaleString()} total visits</span>
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <PWAInstallButton variant="footer" />
+              <span className="inline-flex items-center gap-2 font-mono-num text-slate-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
+                <span>{liveVisitorCount} live online · {totalVisitorCount.toLocaleString()} total visits</span>
+              </span>
+            </div>
           </div>
         </div>
       </footer>
 
       <WelcomeNotificationPopup open={welcomePopupOpen} onClose={dismissWelcomePopup} />
+      <OfflineIndicator />
 
       {toastMessage && (
         <div
