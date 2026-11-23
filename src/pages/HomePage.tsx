@@ -6,7 +6,7 @@ import { DemoLabel, EmptyState } from '../components/CommonUI';
 import { EXAM_CATEGORIES, LEADERBOARD_DATA } from '../data/demoData';
 
 export const HomePage: React.FC = () => {
-  const { state, t, liveVisitorCount } = useApp();
+  const { state, t, liveVisitorCount, totalVisitorCount } = useApp();
   const [heroSelected, setHeroSelected] = useState<number | null>(null);
   const [heroSeconds, setHeroSeconds] = useState(3599);
   const [examSearch, setExamSearch] = useState('');
@@ -344,16 +344,26 @@ export const HomePage: React.FC = () => {
 
               <div
                 aria-live="polite"
-                className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-2 dark:border-[#24385c] dark:bg-[#122443]"
+                className="inline-flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2 dark:border-[#24385c] dark:bg-[#122443]"
               >
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-                <span className="text-xs font-medium text-slate-600 dark:text-[#9fb0c8]">
-                  Live Visitors
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+                  <span className="text-xs font-medium text-slate-600 dark:text-[#9fb0c8]">
+                    Live
+                  </span>
+                  <span className="font-mono-num text-base font-extrabold text-[#102544] dark:text-[#facc15]">
+                    {liveVisitorCount}
+                  </span>
                 </span>
-                <span className="font-mono-num text-base font-extrabold text-[#102544] dark:text-[#facc15]">
-                  {liveVisitorCount}
+                <span className="text-slate-300 dark:text-[#24385c]" aria-hidden="true">|</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-slate-600 dark:text-[#9fb0c8]">
+                    Total Visitors
+                  </span>
+                  <span className="font-mono-num text-base font-extrabold text-[#102544] dark:text-white">
+                    {totalVisitorCount.toLocaleString()}
+                  </span>
                 </span>
-                <span className="text-xs text-slate-500 dark:text-[#9fb0c8]">online now</span>
               </div>
 
               <Link

@@ -215,6 +215,8 @@ export const AdminPage: React.FC = () => {
     liveVisitors,
     liveVisitorCount,
     liveVisitorsRulePending,
+    totalVisitorCount,
+    totalVisitsRulePending,
     seedFirestoreCatalog,
     savePdfBrandingDoc,
     saveCommunityConfigDoc,
@@ -1432,25 +1434,43 @@ export const AdminPage: React.FC = () => {
 
                 return (
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse"
-                          aria-hidden="true"
-                        />
-                        <div>
-                          <div className="text-xs font-medium text-slate-500 dark:text-[#9fb0c8]">
-                            Live Visitors Right Now (last 2 min)
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex flex-wrap items-center gap-6">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 animate-pulse"
+                            aria-hidden="true"
+                          />
+                          <div>
+                            <div className="text-xs font-medium text-slate-500 dark:text-[#9fb0c8]">
+                              Live Visitors Now (last 2 min)
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-baseline gap-2.5">
+                              <span className="font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
+                                {liveVisitorCount}
+                              </span>
+                              <span className="font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                {liveVisitorsRulePending
+                                  ? 'liveVisitors rule pending'
+                                  : `${signedInCount} signed-in · ${guestCount} guests`}
+                              </span>
+                            </div>
                           </div>
-                          <div className="mt-0.5 flex flex-wrap items-baseline gap-2.5">
-                            <span className="font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                              {liveVisitorCount}
+                        </div>
+
+                        <div className="border-l border-slate-200 pl-6 dark:border-[#24385c]">
+                          <div className="text-xs font-medium text-slate-500 dark:text-[#9fb0c8]">
+                            Total Visitors (All Time)
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
+                            <span className="font-mono-num text-2xl font-extrabold text-[#102544] dark:text-[#facc15]">
+                              {totalVisitorCount.toLocaleString()}
                             </span>
-                            <span className="font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
-                              {liveVisitorsRulePending
-                                ? 'Firestore liveVisitors rule pending (showing local tab)'
-                                : `${signedInCount} signed-in · ${guestCount} guests`}
-                            </span>
+                            {totalVisitsRulePending && (
+                              <span className="text-[11px] text-amber-600 dark:text-amber-300">
+                                siteStats rule pending
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

@@ -358,6 +358,17 @@
         "lastSeen": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "path", "signedIn", "active", "lastSeen"]
+    },
+    "SiteStat": {
+      "title": "SiteStat",
+      "description": "Publicly readable atomic site counter document such as totalVisits.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "totalVisits": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "totalVisits", "updatedAt"]
     }
   },
   "firestore": {
@@ -444,6 +455,10 @@
     "/liveVisitors/{visitorId}": {
       "schema": { "$ref": "#/entities/LiveVisitorSession" },
       "description": "Active visitor session heartbeats for real-time online visitor count (no PII)."
+    },
+    "/siteStats/{statId}": {
+      "schema": { "$ref": "#/entities/SiteStat" },
+      "description": "Atomic visitor statistics counters (e.g. totalVisits at /siteStats/visitors)."
     }
   }
 }

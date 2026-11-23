@@ -378,6 +378,17 @@ service cloud.firestore {
         && data.lastSeen is timestamp;
     }
 
+    function isValidSiteStat(data) {
+      return data.keys().hasAll(['id', 'totalVisits', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'totalVisits', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == 'visitors'
+        && (data.totalVisits is int || data.totalVisits is float)
+        && data.totalVisits >= 1
+        && data.totalVisits <= 1000000000
+        && data.updatedAt is timestamp;
+    }
+
     // Connection check document (get only)
     match /test/connection {
       allow get: if resource == null || resource.data.published == true || isAdmin() || isSignedIn();
@@ -652,6 +663,26 @@ service cloud.firestore {
         && incoming().lastSeen == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['path', 'signedIn', 'active', 'lastSeen']);
       allow delete: if isValidId(visitorId) && isAdmin();
+    }
+
+    // Site-wide Total Visitor Counter (atomic +1 increment only)
+    match /siteStats/{statId} {
+      allow get: if isValidId(statId) && (statId == 'visitors' || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(statId)
+        && statId == 'visitors'
+        && isValidSiteStat(incoming())
+        && incoming().id == statId
+        && incoming().totalVisits == 1
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(statId)
+        && statId == 'visitors'
+        && isValidSiteStat(incoming())
+        && incoming().id == existing().id
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'updatedAt'])
+        && incoming().totalVisits == existing().totalVisits + 1;
+      allow delete: if isValidId(statId) && isSuperAdmin();
     }
   }
 }

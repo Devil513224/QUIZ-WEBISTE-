@@ -30,6 +30,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     firebaseUser,
     isAdmin,
     liveVisitorCount,
+    totalVisitorCount,
     reportVisitorPath,
   } = useApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -437,7 +438,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <span>{t.footer.copyright}</span>
             <span className="inline-flex items-center gap-2 font-mono-num text-slate-300">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-              <span>{liveVisitorCount} live online</span>
+              <span>{liveVisitorCount} live online · {totalVisitorCount.toLocaleString()} total visits</span>
             </span>
           </div>
         </div>

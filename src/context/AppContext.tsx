@@ -18,6 +18,7 @@ import {
   limit,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -379,6 +380,8 @@ interface AppContextValue {
   liveVisitors: LiveVisitorItem[];
   liveVisitorCount: number;
   liveVisitorsRulePending: boolean;
+  totalVisitorCount: number;
+  totalVisitsRulePending: boolean;
   reportVisitorPath: (pathname: string) => void;
   seedFirestoreCatalog: (silent?: boolean) => Promise<void>;
   resetDemoState: () => void;
@@ -505,6 +508,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [rawLiveVisitors, setRawLiveVisitors] = useState<LiveVisitorItem[]>([]);
   const [liveVisitorTick, setLiveVisitorTick] = useState<number>(() => Date.now());
   const [liveVisitorsRulePending, setLiveVisitorsRulePending] = useState(false);
+  const [rawTotalVisits, setRawTotalVisits] = useState<number>(0);
+  const [totalVisitsRulePending, setTotalVisitsRulePending] = useState(false);
+  const totalVisitIncrementStartedRef = useRef(false);
   const visitorIdRef = useRef<string>('');
   const visitorPathRef = useRef<string>(
     typeof window !== 'undefined' ? (window.location.pathname || '/').slice(0, 120) : '/'
@@ -1510,6 +1516,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [authReady, isAdmin]);
 
+  // Total Site Visitors (real-time read + atomic +1 increment once per session)
+  useEffect(() => {
+    if (!authReady || !isFirebaseConfigured || !db) return;
+    const statRef = doc(db, 'siteStats', 'visitors');
+
+    const unsub = onSnapshot(
+      statRef,
+      (snap) => {
+        setTotalVisitsRulePending(false);
+        if (snap.exists()) {
+          const val = Number(snap.data().totalVisits || 0);
+          if (Number.isFinite(val) && val >= 0) {
+            setRawTotalVisits(val);
+          }
+        }
+      },
+      (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Missing or insufficient permissions') || msg.includes('permission-denied')) {
+          setTotalVisitsRulePending(true);
+        }
+      }
+    );
+
+    if (!totalVisitIncrementStartedRef.current) {
+      let alreadyCounted = false;
+      try {
+        alreadyCounted = sessionStorage.getItem('tg_total_visit_counted') === '1';
+      } catch {
+        alreadyCounted = false;
+      }
+
+      if (!alreadyCounted) {
+        totalVisitIncrementStartedRef.current = true;
+        void runTransaction(db, async (tx) => {
+          const snap = await tx.get(statRef);
+          if (!snap.exists()) {
+            tx.set(statRef, {
+              id: 'visitors',
+              totalVisits: 1,
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            const current = Number(snap.data().totalVisits || 0);
+            const nextCount = Number.isFinite(current) && current >= 1 ? current + 1 : 1;
+            tx.update(statRef, {
+              totalVisits: nextCount,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        })
+          .then(() => {
+            setTotalVisitsRulePending(false);
+            try {
+              sessionStorage.setItem('tg_total_visit_counted', '1');
+            } catch {
+              // Ignore storage access errors
+            }
+          })
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('Missing or insufficient permissions') || msg.includes('permission-denied')) {
+              setTotalVisitsRulePending(true);
+            }
+          });
+      }
+    }
+
+    return () => unsub();
+  }, [authReady]);
+
   const liveVisitors = useMemo(() => {
     const cutoff = liveVisitorTick - 120_000;
     return rawLiveVisitors
@@ -1521,6 +1598,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!isFirebaseConfigured || !db || liveVisitorsRulePending) return 1;
     return Math.max(1, liveVisitors.length);
   }, [liveVisitors.length, liveVisitorsRulePending]);
+
+  const totalVisitorCount = useMemo(() => {
+    if (!isFirebaseConfigured || !db || totalVisitsRulePending) return liveVisitorCount;
+    return Math.max(liveVisitorCount, rawTotalVisits);
+  }, [liveVisitorCount, rawTotalVisits, totalVisitsRulePending]);
 
   // Persist user progress to Firestore when signed in
   const persistProgressToFirestore = useCallback(async (nextState: PersistedState) => {
@@ -2724,6 +2806,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         liveVisitors,
         liveVisitorCount,
         liveVisitorsRulePending,
+        totalVisitorCount,
+        totalVisitsRulePending,
         reportVisitorPath,
         seedFirestoreCatalog,
         resetDemoState,
