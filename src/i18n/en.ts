@@ -392,6 +392,7 @@ export const en = {
       qb: 'Question Bank',
       quizzes: 'Quizzes',
       mocks: 'Mock Tests',
+      flashcards: 'Flashcards',
       materials: 'Study Materials',
       courses: 'Courses',
       affairs: 'Current Affairs',

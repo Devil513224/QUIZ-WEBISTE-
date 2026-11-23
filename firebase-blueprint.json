@@ -109,10 +109,27 @@
         "negativeMarking": { "type": "number" },
         "shuffle": { "type": "boolean" },
         "note": { "type": "string", "maxLength": 400 },
+        "scheduledAt": { "type": "string", "maxLength": 64 },
+        "isMegaMock": { "type": "boolean" },
         "published": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "type", "name", "subjectKeys", "minutes", "negativeMarking", "published", "updatedAt"]
+    },
+    "Flashcard": {
+      "title": "Flashcard",
+      "description": "Quick revision flip flashcard with front prompt, back answer, and optional hint.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "front": { "type": "string", "minLength": 2, "maxLength": 400 },
+        "back": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "hint": { "type": "string", "maxLength": 240 },
+        "published": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "category", "front", "back", "published", "updatedAt"]
     },
     "StudyMaterial": {
       "title": "StudyMaterial",
@@ -459,6 +476,10 @@
     "/siteStats/{statId}": {
       "schema": { "$ref": "#/entities/SiteStat" },
       "description": "Atomic visitor statistics counters (e.g. totalVisits at /siteStats/visitors)."
+    },
+    "/flashcards/{cardId}": {
+      "schema": { "$ref": "#/entities/Flashcard" },
+      "description": "Quick revision flip flashcards for competitive exam preparation."
     }
   }
 }

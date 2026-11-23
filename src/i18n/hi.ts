@@ -394,6 +394,7 @@ export const hi: TranslationSchema = {
       qb: 'प्रश्न बैंक',
       quizzes: 'क्विज़',
       mocks: 'मॉक टेस्ट',
+      flashcards: 'फ्लैशकार्ड',
       materials: 'स्टडी मटेरियल',
       courses: 'कोर्स',
       affairs: 'करेंट अफेयर्स',

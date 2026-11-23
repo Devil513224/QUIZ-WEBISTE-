@@ -7,6 +7,7 @@ import { ExamsPage } from './pages/ExamsPage';
 import { TestsPage } from './pages/TestsPage';
 import { MaterialsPage } from './pages/MaterialsPage';
 import { CoursesPage } from './pages/CoursesPage';
+import { FlashcardsPage } from './pages/FlashcardsPage';
 import { TypingPage } from './pages/TypingPage';
 import {
   AboutPage,
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="/materials" element={<MaterialsPage />} />
               <Route path="/courses" element={<CoursesPage />} />
               <Route path="/courses/:id" element={<CoursesPage />} />
+              <Route path="/flashcards" element={<FlashcardsPage />} />
               <Route path="/typing" element={<TypingPage />} />
               <Route path="/affairs" element={<CurrentAffairsPage />} />
               <Route path="/jobs" element={<JobsPage />} />
@@ -58,6 +60,7 @@ export default function App() {
               <Route path="/admin/mock-tests" element={<Navigate to="/admin?section=tests&type=Mock%20Test" replace />} />
               <Route path="/admin/materials" element={<Navigate to="/admin?section=materials" replace />} />
               <Route path="/admin/courses" element={<Navigate to="/admin?section=courses" replace />} />
+              <Route path="/admin/flashcards" element={<Navigate to="/admin?section=flashcards" replace />} />
               <Route path="/admin/typing" element={<Navigate to="/admin?section=typing" replace />} />
               <Route path="/admin/affairs" element={<Navigate to="/admin?section=affairs" replace />} />
               <Route path="/admin/jobs" element={<Navigate to="/admin?section=jobs" replace />} />

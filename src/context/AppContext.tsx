@@ -32,6 +32,7 @@ import {
   INITIAL_AFFAIRS,
   INITIAL_BANNERS,
   INITIAL_COURSES,
+  INITIAL_FLASHCARDS,
   INITIAL_HOMEPAGE_SECTIONS,
   INITIAL_JOBS,
   INITIAL_MATERIALS,
@@ -42,6 +43,7 @@ import {
   type BannerItem,
   type CourseItem,
   type CurrentAffairItem,
+  type FlashcardItem,
   type HomepageSectionItem,
   type JobUpdateItem,
   type NotificationItem,
@@ -174,6 +176,8 @@ export interface PersistedState {
   profile: UserProfile;
   questions: QuestionItem[];
   tests: TestDefinition[];
+  flashcards: FlashcardItem[];
+  masteredFlashcards: string[];
   banners: BannerItem[];
   homepageSections: HomepageSectionItem[];
   materials: StudyMaterialItem[];
@@ -263,6 +267,8 @@ const getInitialState = (): PersistedState => {
     },
     questions: INITIAL_QUESTIONS,
     tests: INITIAL_TESTS,
+    flashcards: INITIAL_FLASHCARDS,
+    masteredFlashcards: [],
     banners: INITIAL_BANNERS,
     homepageSections: INITIAL_HOMEPAGE_SECTIONS.map((s, idx) => ({ ...s, order: idx })),
     materials: INITIAL_MATERIALS,
@@ -319,6 +325,8 @@ interface AppContextValue {
   toggleTheme: () => void;
   setLanguage: (lang: LanguageCode) => void;
   toggleSaveMaterial: (id: string) => void;
+  toggleMasteredFlashcard: (id: string) => void;
+  resetMasteredFlashcards: () => void;
   toggleLesson: (lessonKey: string) => void;
   toggleSyllabusKey: (key: string) => void;
   addTypingAttempt: (attempt: TypingAttempt) => void;
@@ -336,6 +344,15 @@ interface AppContextValue {
   deleteQuestionDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveTestDoc: (item: TestDefinition, actionHint?: AdminActionHint) => Promise<void>;
   deleteTestDoc: (id: string, displayLabel?: string) => Promise<void>;
+  setMegaMockTimerState: (opts: {
+    enabled: boolean;
+    testId?: string;
+    scheduledAt?: string;
+  }) => Promise<void>;
+  testsSynced: boolean;
+  saveFlashcardDoc: (item: FlashcardItem, actionHint?: AdminActionHint) => Promise<void>;
+  deleteFlashcardDoc: (id: string, displayLabel?: string) => Promise<void>;
+  flashcardsRulePending: boolean;
   saveMaterialDoc: (item: StudyMaterialItem, actionHint?: AdminActionHint) => Promise<void>;
   deleteMaterialDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveCourseDoc: (item: CourseItem, actionHint?: AdminActionHint) => Promise<void>;
@@ -510,6 +527,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [liveVisitorsRulePending, setLiveVisitorsRulePending] = useState(false);
   const [rawTotalVisits, setRawTotalVisits] = useState<number>(0);
   const [totalVisitsRulePending, setTotalVisitsRulePending] = useState(false);
+  const [flashcardsRulePending, setFlashcardsRulePending] = useState(false);
+  const [testsSynced, setTestsSynced] = useState(false);
   const totalVisitIncrementStartedRef = useRef(false);
   const visitorIdRef = useRef<string>('');
   const visitorPathRef = useRef<string>(
@@ -611,7 +630,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       INITIAL_TESTS.forEach((tst) => {
         const defaultCount =
           tst.type === 'Daily Quiz' ? 10 : tst.type === 'Mock Test' ? 50 : 20;
-        batch.set(doc(db, 'tests', tst.id), {
+        const docPayload: Record<string, unknown> = {
           id: tst.id,
           type: tst.type,
           name: tst.name,
@@ -625,7 +644,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           note: tst.note || '',
           published: tst.published ?? true,
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (tst.scheduledAt) docPayload.scheduledAt = tst.scheduledAt;
+        if (tst.isMegaMock) docPayload.isMegaMock = true;
+        batch.set(doc(db, 'tests', tst.id), docPayload);
       });
 
       batch.set(doc(db, 'siteBranding', 'pdf'), {
@@ -970,7 +992,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       onSnapshot(
         makePublicOrAdminQuery('tests'),
         (snap) => {
-          if (snap.empty) return;
+          if (snap.empty) {
+            setTestsSynced(false);
+            return;
+          }
+          setTestsSynced(true);
           const list = snap.docs.map((d) => {
             const data = d.data() as TestDefinition & { updatedAt?: unknown };
             return {
@@ -984,12 +1010,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     ? data.questionLimit
                     : undefined,
               shuffle: Boolean(data.shuffle ?? data.type === 'Daily Quiz'),
+              scheduledAt: typeof data.scheduledAt === 'string' && data.scheduledAt.trim() ? data.scheduledAt.trim() : undefined,
+              isMegaMock: Boolean(data.isMegaMock),
               updatedAt: extractTimestampInfo(data.updatedAt).formatted,
             };
           });
           setState((prev) => ({ ...prev, tests: list }));
         },
         (err) => handleFirestoreError(err, OperationType.LIST, 'tests')
+      )
+    );
+
+    // Quick Revision Flashcards (graceful fallback if rule not yet published)
+    unsubs.push(
+      onSnapshot(
+        makePublicOrAdminQuery('flashcards'),
+        (snap) => {
+          setFlashcardsRulePending(false);
+          if (snap.empty) return;
+          const list = snap.docs.map((d) => {
+            const data = d.data() as FlashcardItem & { updatedAt?: unknown };
+            return {
+              ...data,
+              hint: data.hint ? String(data.hint) : undefined,
+              updatedAt: extractTimestampInfo(data.updatedAt).formatted,
+            };
+          });
+          setState((prev) => ({ ...prev, flashcards: list }));
+        },
+        (err) => {
+          const code = (err as { code?: string })?.code;
+          if (code === 'permission-denied') {
+            setFlashcardsRulePending(true);
+            return;
+          }
+          handleFirestoreError(err, OperationType.LIST, 'flashcards');
+        }
       )
     );
 
@@ -1701,6 +1757,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const toggleMasteredFlashcard = (id: string) => {
+    setState((prev) => {
+      const exists = prev.masteredFlashcards.includes(id);
+      return {
+        ...prev,
+        masteredFlashcards: exists
+          ? prev.masteredFlashcards.filter((item) => item !== id)
+          : [...prev.masteredFlashcards, id],
+      };
+    });
+  };
+
+  const resetMasteredFlashcards = () => {
+    setState((prev) => ({
+      ...prev,
+      masteredFlashcards: [],
+    }));
+  };
+
   const toggleLesson = (lessonKey: string) => {
     setState((prev) => {
       const exists = prev.completedLessons.includes(lessonKey);
@@ -1959,10 +2034,168 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: serverTimestamp(),
       };
       if (item.note) payload.note = item.note.slice(0, 400);
+      if (item.scheduledAt && item.scheduledAt.trim()) {
+        payload.scheduledAt = item.scheduledAt.trim().slice(0, 64);
+      }
+      if (item.isMegaMock) {
+        payload.isMegaMock = true;
+      }
       await setDoc(doc(db, 'tests', id), payload);
       await logAdminActivity(describeAdminAction(actionHint, exists, item.type, item.name));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const setMegaMockTimerState = async (opts: {
+    enabled: boolean;
+    testId?: string;
+    scheduledAt?: string;
+  }) => {
+    if (!isFirebaseConfigured || !db) return;
+    const toPayload = (
+      item: TestDefinition,
+      enableMega: boolean,
+      scheduleOverride?: string
+    ) => {
+      const id = cleanId(item.id, 'tst');
+      const defaultCount =
+        item.type === 'Daily Quiz' ? 10 : item.type === 'Mock Test' ? 50 : 20;
+      const resolvedCount = Math.max(
+        1,
+        Math.min(500, Number(item.questionCount ?? item.questionLimit) || defaultCount)
+      );
+      const payload: Record<string, unknown> = {
+        id,
+        type: item.type,
+        name: item.name.slice(0, 160),
+        subjectKeys: item.subjectKeys.length ? item.subjectKeys.slice(0, 10) : ['gk'],
+        examIds: (item.examIds || []).slice(0, 20),
+        questionIds: (item.questionIds || []).slice(0, 200),
+        questionCount: resolvedCount,
+        minutes: Math.max(1, Math.min(360, Number(item.minutes) || 5)),
+        negativeMarking: Math.max(0, Math.min(5, Number(item.negativeMarking) || 0)),
+        shuffle: Boolean(item.shuffle ?? item.type === 'Daily Quiz'),
+        published: enableMega ? true : Boolean(item.published ?? true),
+        updatedAt: serverTimestamp(),
+      };
+      if (item.note) payload.note = item.note.slice(0, 400);
+      if (enableMega) {
+        payload.isMegaMock = true;
+        const rawSched =
+          scheduleOverride !== undefined ? scheduleOverride : item.scheduledAt;
+        if (rawSched && rawSched.trim()) {
+          payload.scheduledAt = rawSched.trim().slice(0, 64);
+        }
+      }
+      return { id, payload };
+    };
+
+    try {
+      const batch = writeBatch(db);
+      if (!opts.enabled) {
+        const sourceList = testsSynced ? state.tests : INITIAL_TESTS;
+        let changedCount = 0;
+        sourceList.forEach((tst) => {
+          if (!testsSynced || tst.isMegaMock || tst.scheduledAt) {
+            const { id, payload } = toPayload(tst, false);
+            batch.set(doc(db, 'tests', id), payload);
+            changedCount += 1;
+          }
+        });
+        if (changedCount > 0) {
+          await batch.commit();
+          await logAdminActivity('Turned Mega Mock countdown timer OFF');
+        }
+        return;
+      }
+
+      const sourceList = testsSynced ? state.tests : INITIAL_TESTS;
+      const targetId = opts.testId || sourceList[0]?.id || 'mega_sunday';
+      const target =
+        sourceList.find((tItem) => tItem.id === targetId) ||
+        INITIAL_TESTS.find((tItem) => tItem.id === 'mega_sunday') ||
+        sourceList[0];
+      if (!target) return;
+
+      if (!testsSynced) {
+        INITIAL_TESTS.forEach((tst) => {
+          const isTarget = tst.id === target.id;
+          const { id, payload } = toPayload(
+            tst,
+            isTarget,
+            isTarget ? opts.scheduledAt : undefined
+          );
+          batch.set(doc(db, 'tests', id), payload);
+        });
+      } else {
+        sourceList.forEach((tst) => {
+          if (tst.id !== target.id && (tst.isMegaMock || tst.scheduledAt)) {
+            const { id, payload } = toPayload(tst, false);
+            batch.set(doc(db, 'tests', id), payload);
+          }
+        });
+        const { id, payload } = toPayload(target, true, opts.scheduledAt);
+        batch.set(doc(db, 'tests', id), payload);
+      }
+      await batch.commit();
+      await logAdminActivity(`Turned Mega Mock countdown timer ON: ${target.name}`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'tests');
+    }
+  };
+
+  const saveFlashcardDoc = async (item: FlashcardItem, actionHint?: AdminActionHint) => {
+    const id = cleanId(item.id, 'fc');
+    const path = `flashcards/${id}`;
+    const exists = state.flashcards.some((fc) => fc.id === id);
+    try {
+      const payload: Record<string, unknown> = {
+        id,
+        category: (item.category || 'GK').trim().slice(0, 60),
+        front: item.front.trim().slice(0, 400),
+        back: item.back.trim().slice(0, 600),
+        published: Boolean(item.published),
+        updatedAt: serverTimestamp(),
+      };
+      if (item.hint && item.hint.trim()) {
+        payload.hint = item.hint.trim().slice(0, 240);
+      }
+      await setDoc(doc(db, 'flashcards', id), payload);
+      setFlashcardsRulePending(false);
+      await logAdminActivity(describeAdminAction(actionHint, exists, 'flashcard', item.front.slice(0, 50)));
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'permission-denied') {
+        setFlashcardsRulePending(true);
+        showToast('Publish the updated Firestore rules in Firebase Console to save flashcards.');
+        return;
+      }
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const deleteFlashcardDoc = async (id: string, displayLabel?: string) => {
+    const path = `flashcards/${id}`;
+    const docRef = doc(db, 'flashcards', id);
+    try {
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().front || 'Flashcard')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        flashcards: prev.flashcards.filter((fc) => fc.id !== id),
+      }));
+      await logAdminActivity(`Deleted flashcard: ${readable}`);
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'permission-denied') {
+        setFlashcardsRulePending(true);
+        showToast('Publish the updated Firestore rules in Firebase Console to delete flashcards.');
+        return;
+      }
+      handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
@@ -2762,6 +2995,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleTheme,
         setLanguage,
         toggleSaveMaterial,
+        toggleMasteredFlashcard,
+        resetMasteredFlashcards,
         toggleLesson,
         toggleSyllabusKey,
         addTypingAttempt,
@@ -2778,6 +3013,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteQuestionDoc,
         saveTestDoc,
         deleteTestDoc,
+        setMegaMockTimerState,
+        testsSynced,
+        saveFlashcardDoc,
+        deleteFlashcardDoc,
+        flashcardsRulePending,
         saveMaterialDoc,
         deleteMaterialDoc,
         saveCourseDoc,

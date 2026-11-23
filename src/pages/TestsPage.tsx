@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Clock, Download, FileText, LayoutGrid, X } from 'lucide-react';
+import { CheckCircle2, Clock, Download, FileText, LayoutGrid, Lock, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DemoLabel, EmptyState } from '../components/CommonUI';
+import {
+  formatCountdownParts,
+  formatScheduledDateLabel,
+  getScheduledTargetMs,
+  isTestLockedBySchedule,
+} from '../components/MegaMockBanner';
 import {
   EXAM_CATEGORIES,
   LOGO_URL,
@@ -75,6 +81,20 @@ export const TestsPage: React.FC = () => {
     () => state.tests.filter((x) => x.published !== false),
     [state.tests]
   );
+
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const hasFutureScheduledTest = useMemo(
+    () => availableTests.some((tst) => isTestLockedBySchedule(tst, nowMs)),
+    [availableTests, nowMs]
+  );
+
+  useEffect(() => {
+    if (!hasFutureScheduledTest) return;
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [hasFutureScheduledTest]);
 
   useEffect(() => {
     if (startParam) {
@@ -160,6 +180,11 @@ export const TestsPage: React.FC = () => {
   };
 
   const beginExam = (test: TestDefinition) => {
+    if (isTestLockedBySchedule(test, Date.now())) {
+      const label = formatScheduledDateLabel(test.scheduledAt);
+      showToast(`This Mega Mock unlocks at ${label}.`);
+      return;
+    }
     const qs = getQuestionsForTest(test);
     if (!qs.length) {
       showToast('No published questions match the selected test or language.');
@@ -248,6 +273,11 @@ export const TestsPage: React.FC = () => {
   if (view === 'instructions' && activeTest) {
     const availCount = getQuestionsForTest(activeTest).length;
     const qCount = activeTest.id === 'custom' ? availCount : getStoredQuestionCount(activeTest);
+    const activeTargetMs = getScheduledTargetMs(activeTest.scheduledAt);
+    const activeLocked = activeTargetMs !== null && nowMs < activeTargetMs;
+    const activeParts = activeTargetMs !== null ? formatCountdownParts(activeTargetMs, nowMs) : null;
+    const activeScheduleLabel = formatScheduledDateLabel(activeTest.scheduledAt);
+
     return (
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 dark:border-[#24385c] dark:bg-[#122443]">
@@ -257,6 +287,22 @@ export const TestsPage: React.FC = () => {
           </h1>
           {activeTest.note && (
             <p className="mt-2 text-sm text-slate-600 dark:text-[#9fb0c8]">{activeTest.note}</p>
+          )}
+
+          {activeLocked && activeParts && (
+            <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-950/30">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-amber-900 dark:text-amber-200">
+                <span className="inline-flex items-center gap-1.5">
+                  <Lock className="h-4 w-4" />
+                  <span>Scheduled Mega Mock — Opens at {activeScheduleLabel}</span>
+                </span>
+                <span className="font-mono-num">
+                  Starts in {activeParts.days}d {String(activeParts.hours).padStart(2, '0')}h{' '}
+                  {String(activeParts.minutes).padStart(2, '0')}m{' '}
+                  {String(activeParts.seconds).padStart(2, '0')}s
+                </span>
+              </div>
+            </div>
           )}
 
           <div className="mt-4 flex flex-wrap gap-4 font-mono-num text-sm text-slate-600 dark:text-[#9fb0c8]">
@@ -291,7 +337,7 @@ export const TestsPage: React.FC = () => {
             </button>
             <button
               type="button"
-              disabled={pdfBusyId === activeTest.id || availCount === 0}
+              disabled={pdfBusyId === activeTest.id || availCount === 0 || activeLocked}
               onClick={() => void handleDownloadTestPdf(activeTest)}
               className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
             >
@@ -300,11 +346,12 @@ export const TestsPage: React.FC = () => {
             </button>
             <button
               type="button"
-              disabled={availCount === 0}
+              disabled={availCount === 0 || activeLocked}
               onClick={() => beginExam(activeTest)}
-              className="inline-flex h-10 items-center justify-center rounded-xl bg-[#facc15] px-6 text-sm font-bold text-[#102544] hover:brightness-95 disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[#facc15] px-6 text-sm font-bold text-[#102544] hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {t.home.startTest}
+              {activeLocked && <Lock className="h-4 w-4" />}
+              <span>{activeLocked ? 'Locked Until Schedule' : t.home.startTest}</span>
             </button>
           </div>
         </div>
@@ -1217,13 +1264,33 @@ export const TestsPage: React.FC = () => {
             const examNames = (test.examIds || [])
               .map((eid) => EXAM_CATEGORIES.find((e) => e.id === eid)?.name)
               .filter(Boolean) as string[];
+            const targetMs = getScheduledTargetMs(test.scheduledAt);
+            const isLocked = targetMs !== null && nowMs < targetMs;
+            const countdownParts = targetMs !== null && isLocked ? formatCountdownParts(targetMs, nowMs) : null;
             return (
               <div
                 key={test.id}
                 className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-[#24385c] dark:bg-[#122443]"
               >
                 <div>
-                  <DemoLabel text={`${test.type}`} />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <DemoLabel text={`${test.type}`} />
+                    {test.isMegaMock && !isLocked && (
+                      <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>LIVE MEGA MOCK</span>
+                      </span>
+                    )}
+                    {isLocked && countdownParts && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 font-mono-num text-[11px] font-bold text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                        <Lock className="h-3 w-3" />
+                        <span>
+                          {countdownParts.days}d {String(countdownParts.hours).padStart(2, '0')}h{' '}
+                          {String(countdownParts.minutes).padStart(2, '0')}m
+                        </span>
+                      </span>
+                    )}
+                  </div>
                   <h2 className="mt-1.5 font-display text-xl font-bold text-slate-900 dark:text-white">
                     {test.name}
                   </h2>
@@ -1250,6 +1317,11 @@ export const TestsPage: React.FC = () => {
                         : t.tests.noNegative}
                     </span>
                   </div>
+                  {isLocked && (
+                    <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+                      Unlocks: {formatScheduledDateLabel(test.scheduledAt)}
+                    </p>
+                  )}
                 </div>
                 <div className="mt-5 flex flex-wrap items-center gap-2">
                   <button
@@ -1260,11 +1332,11 @@ export const TestsPage: React.FC = () => {
                     }}
                     className="inline-flex h-10 items-center justify-center rounded-lg bg-[#102544] px-4 text-sm font-semibold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
                   >
-                    {t.tests.viewInstructions}
+                    {isLocked ? 'View Countdown' : t.tests.viewInstructions}
                   </button>
                   <button
                     type="button"
-                    disabled={pdfBusyId === test.id || availCount === 0}
+                    disabled={pdfBusyId === test.id || availCount === 0 || isLocked}
                     onClick={() => void handleDownloadTestPdf(test)}
                     className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-200"
                   >

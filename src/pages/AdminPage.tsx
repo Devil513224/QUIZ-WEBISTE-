@@ -7,6 +7,7 @@ import {
   Bell,
   BookOpen,
   Briefcase,
+  CalendarClock,
   Check,
   CheckCircle2,
   ClipboardList,
@@ -21,6 +22,7 @@ import {
   HelpCircle,
   Image as ImageIcon,
   Keyboard,
+  Layers,
   LayoutDashboard,
   LayoutTemplate,
   Lock,
@@ -69,6 +71,7 @@ import {
   DEFAULT_PDF_BRANDING,
   DEFAULT_SITE_COMMUNITY,
   EXAM_CATEGORIES,
+  type FlashcardItem,
   type JobUpdateItem,
   LOGO_URL,
   type NotificationItem,
@@ -95,6 +98,7 @@ type SectionKey =
   | 'qb'
   | 'quizzes'
   | 'mocks'
+  | 'flashcards'
   | 'materials'
   | 'courses'
   | 'affairs'
@@ -106,6 +110,21 @@ type SectionKey =
   | 'reports'
   | 'sitesettings'
   | 'logs';
+
+const toDatetimeLocalValue = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const fromDatetimeLocalValue = (val: string): string | undefined => {
+  if (!val.trim()) return undefined;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+};
 
 interface ColumnSpec {
   key: string;
@@ -156,7 +175,8 @@ const SECTION_GUIDE: Record<SectionKey, string> = {
   categories: 'Organize content categories across the website.',
   qb: 'Create single or bulk MCQs in English, Bengali, or Hindi for quizzes and mock tests.',
   quizzes: 'Manage Daily Quizzes. Students see published quizzes immediately on the Quizzes page.',
-  mocks: 'Manage full-length Mock Tests, Sectional Tests, and Previous-Year Papers.',
+  mocks: 'Manage full-length Mock Tests, Sectional Tests, Previous-Year Papers, and scheduled Mega Live Mocks.',
+  flashcards: 'Create and edit one-tap Quick Revision Flashcards for GK, Polity, History, Science, and Computer.',
   materials: 'Upload PDF study notes or attach external PDF links for students to read and save.',
   courses: 'Create free video/lesson courses and manage their lesson checklists.',
   affairs: 'Post Daily, Weekly, or Monthly current affairs headlines and summaries.',
@@ -190,6 +210,11 @@ export const AdminPage: React.FC = () => {
     deleteQuestionDoc,
     saveTestDoc,
     deleteTestDoc,
+    setMegaMockTimerState,
+    testsSynced,
+    saveFlashcardDoc,
+    deleteFlashcardDoc,
+    flashcardsRulePending,
     saveMaterialDoc,
     deleteMaterialDoc,
     saveCourseDoc,
@@ -324,6 +349,13 @@ export const AdminPage: React.FC = () => {
     correctOverrides: Record<number, number>;
     bankSearch: string;
   } | null>(null);
+  const [flashcardModal, setFlashcardModal] = useState<{ mode: 'add' | 'edit'; item: FlashcardItem } | null>(null);
+  const [megaPickerId, setMegaPickerId] = useState<string>('');
+  const [megaScheduleInput, setMegaScheduleInput] = useState<string>(() => {
+    const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    d.setHours(10, 0, 0, 0);
+    return toDatetimeLocalValue(d.toISOString());
+  });
   const [materialModal, setMaterialModal] = useState<{ mode: 'add' | 'edit'; item: StudyMaterialItem } | null>(null);
   const [courseModal, setCourseModal] = useState<{ mode: 'add' | 'edit'; item: CourseItem; lessonsText: string } | null>(null);
   const [affairModal, setAffairModal] = useState<{ mode: 'add' | 'edit'; item: CurrentAffairItem } | null>(null);
@@ -454,6 +486,18 @@ export const AdminPage: React.FC = () => {
         (!q || m.title.toLowerCase().includes(q) || m.subject.toLowerCase().includes(q))
     );
   }, [state.materials, searchTerm, statusFilter]);
+
+  const flashcardFiltered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return state.flashcards.filter(
+      (fc) =>
+        matchesStatus(fc.published) &&
+        (!q ||
+          fc.front.toLowerCase().includes(q) ||
+          fc.back.toLowerCase().includes(q) ||
+          fc.category.toLowerCase().includes(q))
+    );
+  }, [state.flashcards, searchTerm, statusFilter]);
 
   const courseFiltered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -781,6 +825,12 @@ export const AdminPage: React.FC = () => {
           count: state.questions.length,
         },
         {
+          key: 'flashcards',
+          label: t.admin.sections.flashcards,
+          icon: <Layers className="h-4 w-4" />,
+          count: state.flashcards.length,
+        },
+        {
           key: 'materials',
           label: t.admin.sections.materials,
           icon: <FileText className="h-4 w-4" />,
@@ -991,6 +1041,7 @@ export const AdminPage: React.FC = () => {
     try {
       if (kind === 'qb') await deleteQuestionDoc(id);
       else if (kind === 'quizzes' || kind === 'mocks') await deleteTestDoc(id);
+      else if (kind === 'flashcards') await deleteFlashcardDoc(id);
       else if (kind === 'materials') await deleteMaterialDoc(id);
       else if (kind === 'courses') await deleteCourseDoc(id);
       else if (kind === 'affairs') await deleteAffairDoc(id);
@@ -1018,6 +1069,9 @@ export const AdminPage: React.FC = () => {
       } else if (kind === 'quizzes' || kind === 'mocks') {
         const tst = state.tests.find((item) => item.id === id);
         if (tst) await saveTestDoc({ ...tst, published: false }, 'unpublish');
+      } else if (kind === 'flashcards') {
+        const fc = state.flashcards.find((item) => item.id === id);
+        if (fc) await saveFlashcardDoc({ ...fc, published: false }, 'unpublish');
       } else if (kind === 'courses') {
         const crs = state.courses.find((item) => item.id === id);
         if (crs) await saveCourseDoc({ ...crs, published: false }, 'unpublish');
@@ -2042,8 +2096,164 @@ export const AdminPage: React.FC = () => {
             const list = section === 'quizzes' ? quizFiltered : mockFiltered;
             const { slice, totalPages, safePage, totalCount } = paginate(list);
             const defaultType = section === 'quizzes' ? 'Daily Quiz' : 'Mock Test';
+            const activeTimers = state.tests.filter(
+              (tItem) =>
+                tItem.published !== false &&
+                (Boolean(tItem.isMegaMock) || Boolean(tItem.scheduledAt && tItem.scheduledAt.trim()))
+            );
+            const primaryTimerTest = activeTimers[0] || null;
+            const selectableTests = state.tests.filter((tItem) => tItem.published !== false);
+            const selectedPickId =
+              megaPickerId && selectableTests.some((tItem) => tItem.id === megaPickerId)
+                ? megaPickerId
+                : (list[0]?.id || selectableTests[0]?.id || '');
+
             return (
               <div className="space-y-4">
+                {/* Admin Countdown Timer ON / OFF Control */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#102544] text-[#facc15] dark:bg-[#16294b]">
+                        <CalendarClock className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">
+                            Mega Mock Countdown Timer (Home &amp; Test Lock)
+                          </span>
+                          {primaryTimerTest ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              ON
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600 dark:bg-[#16294b] dark:text-[#9fb0c8]">
+                              OFF
+                            </span>
+                          )}
+                        </div>
+                        {primaryTimerTest ? (
+                          <p className="mt-0.5 text-xs text-slate-600 dark:text-[#9fb0c8]">
+                            Active on{' '}
+                            <strong className="text-slate-900 dark:text-white">
+                              {primaryTimerTest.name}
+                            </strong>
+                            {primaryTimerTest.scheduledAt
+                              ? ` · Unlocks ${new Date(primaryTimerTest.scheduledAt).toLocaleString('en-IN', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}`
+                              : ' · Live Now (Banner ON)'}
+                          </p>
+                        ) : (
+                          <p className="mt-0.5 text-xs text-slate-500 dark:text-[#9fb0c8]">
+                            Currently OFF — Homepage countdown banner is hidden and all tests are unlocked.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {primaryTimerTest ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={savingBusy}
+                          onClick={() =>
+                            setTestModal({
+                              mode: 'edit',
+                              item: {
+                                ...primaryTimerTest,
+                                examIds: primaryTimerTest.examIds || [],
+                                questionCount:
+                                  primaryTimerTest.questionCount ??
+                                  primaryTimerTest.questionLimit ??
+                                  50,
+                                shuffle: Boolean(primaryTimerTest.shuffle),
+                              },
+                              tab: 'bulk',
+                              bulkSubjectKey: primaryTimerTest.subjectKeys[0] || 'gk',
+                              bulkLanguage: 'English',
+                              bulkText: '',
+                              correctOverrides: {},
+                              bankSearch: '',
+                            })
+                          }
+                          className="h-9 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:text-slate-200 dark:hover:bg-[#16294b]"
+                        >
+                          Edit Time
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingBusy}
+                          onClick={async () => {
+                            setSavingBusy(true);
+                            try {
+                              await setMegaMockTimerState({ enabled: false });
+                              showToast('Countdown Timer turned OFF.');
+                            } finally {
+                              setSavingBusy(false);
+                            }
+                          }}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60"
+                        >
+                          <EyeOff className="h-3.5 w-3.5" />
+                          <span>Turn Timer OFF</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {selectableTests.length > 0 && (
+                          <>
+                            <select
+                              aria-label="Select test for countdown timer"
+                              value={selectedPickId}
+                              onChange={(e) => setMegaPickerId(e.target.value)}
+                              className="h-9 max-w-[210px] rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                            >
+                              {selectableTests.map((tItem) => (
+                                <option key={tItem.id} value={tItem.id}>
+                                  {tItem.name}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="datetime-local"
+                              aria-label="Timer unlock date and time"
+                              value={megaScheduleInput}
+                              onChange={(e) => setMegaScheduleInput(e.target.value)}
+                              className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 font-mono-num text-xs dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                            />
+                            <button
+                              type="button"
+                              disabled={savingBusy || !selectedPickId}
+                              onClick={async () => {
+                                setSavingBusy(true);
+                                try {
+                                  await setMegaMockTimerState({
+                                    enabled: true,
+                                    testId: selectedPickId,
+                                    scheduledAt: fromDatetimeLocalValue(megaScheduleInput),
+                                  });
+                                  showToast('Countdown Timer turned ON!');
+                                } finally {
+                                  setSavingBusy(false);
+                                }
+                              }}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              <span>Turn Timer ON</span>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
@@ -2113,7 +2323,27 @@ export const AdminPage: React.FC = () => {
                           return (
                             <tr key={tst.id}>
                               <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">
-                                {tst.name}
+                                <div>{tst.name}</div>
+                                {(tst.isMegaMock || tst.scheduledAt) && (
+                                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                    {tst.isMegaMock && (
+                                      <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-[#facc15]">
+                                        MEGA LIVE
+                                      </span>
+                                    )}
+                                    {tst.scheduledAt && (
+                                      <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono-num text-[10px] font-semibold text-slate-700 dark:bg-[#16294b] dark:text-[#9fb0c8]">
+                                        <CalendarClock className="h-3 w-3" />
+                                        {new Date(tst.scheduledAt).toLocaleString('en-IN', {
+                                          day: '2-digit',
+                                          month: 'short',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
                                 <div className="font-medium text-slate-800 dark:text-slate-100">
@@ -2156,6 +2386,57 @@ export const AdminPage: React.FC = () => {
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="inline-flex items-center gap-1.5">
+                                  {(() => {
+                                    const isRowTimerOn = Boolean(
+                                      tst.isMegaMock || (tst.scheduledAt && tst.scheduledAt.trim())
+                                    );
+                                    return (
+                                      <button
+                                        type="button"
+                                        disabled={savingBusy}
+                                        onClick={async () => {
+                                          setSavingBusy(true);
+                                          try {
+                                            if (isRowTimerOn) {
+                                              if (!testsSynced) {
+                                                await setMegaMockTimerState({ enabled: false });
+                                              } else {
+                                                await saveTestDoc(
+                                                  { ...tst, isMegaMock: false, scheduledAt: undefined },
+                                                  'update'
+                                                );
+                                              }
+                                              showToast(`Timer turned OFF for "${tst.name}".`);
+                                            } else {
+                                              await setMegaMockTimerState({
+                                                enabled: true,
+                                                testId: tst.id,
+                                                scheduledAt:
+                                                  fromDatetimeLocalValue(megaScheduleInput) ||
+                                                  tst.scheduledAt,
+                                              });
+                                              showToast(`Timer turned ON for "${tst.name}"!`);
+                                            }
+                                          } finally {
+                                            setSavingBusy(false);
+                                          }
+                                        }}
+                                        title={
+                                          isRowTimerOn
+                                            ? 'Click to turn Countdown Timer OFF'
+                                            : 'Click to turn Countdown Timer ON for this test'
+                                        }
+                                        className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:opacity-50 ${
+                                          isRowTimerOn
+                                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                            : 'border border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-[#24385c] dark:text-[#9fb0c8] dark:hover:bg-[#16294b]'
+                                        }`}
+                                      >
+                                        <CalendarClock className="h-3.5 w-3.5" />
+                                        <span>{isRowTimerOn ? 'Timer ON' : 'Timer OFF'}</span>
+                                      </button>
+                                    );
+                                  })()}
                                   <button
                                     type="button"
                                     disabled={pdfExportBusyId === tst.id}
@@ -2200,6 +2481,122 @@ export const AdminPage: React.FC = () => {
                             </tr>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <PaginationBar page={safePage} totalPages={totalPages} totalCount={totalCount} onPageChange={setPage} />
+              </div>
+            );
+          })()}
+
+          {/* 4B. QUICK REVISION FLASHCARDS */}
+          {section === 'flashcards' && (() => {
+            const { slice, totalPages, safePage, totalCount } = paginate(flashcardFiltered);
+            return (
+              <div className="space-y-4">
+                {flashcardsRulePending && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs font-medium text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div>
+                      <strong>Firestore rule publish pending:</strong> Publish the updated{' '}
+                      <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">
+                        flashcards
+                      </code>{' '}
+                      rule in Firebase Console so new flashcards sync for all students. Starter flashcards are active locally in the meantime.
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                    <StatusFilter
+                      value={statusFilter}
+                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFlashcardModal({
+                        mode: 'add',
+                        item: {
+                          id: `fc_${Date.now()}`,
+                          category: 'Polity',
+                          front: '',
+                          back: '',
+                          hint: '',
+                          published: true,
+                        },
+                      })
+                    }
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Add Flashcard</span>
+                  </button>
+                </div>
+
+                {slice.length === 0 ? (
+                  <EmptyState onReset={resetFilters} />
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
+                        <tr>
+                          <th className="px-4 py-3">Category</th>
+                          <th className="px-4 py-3">Front (Prompt)</th>
+                          <th className="px-4 py-3">Back (Answer)</th>
+                          <th className="px-4 py-3">Last updated</th>
+                          <th className="px-4 py-3">{t.common.status}</th>
+                          <th className="px-4 py-3 text-right">{t.common.actions}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
+                        {slice.map((fc) => (
+                          <tr key={fc.id}>
+                            <td className="px-4 py-3">
+                              <span className="inline-block rounded-md bg-[#eef2f8] px-2 py-0.5 text-xs font-semibold text-[#102544] dark:bg-[#16294b] dark:text-[#facc15]">
+                                {fc.category}
+                              </span>
+                            </td>
+                            <td className="max-w-xs px-4 py-3 font-medium text-slate-900 dark:text-white">
+                              <div className="line-clamp-2">{fc.front}</div>
+                            </td>
+                            <td className="max-w-xs px-4 py-3 text-slate-600 dark:text-[#9fb0c8]">
+                              <div className="line-clamp-2">{fc.back}</div>
+                            </td>
+                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                              {fc.updatedAt || '—'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <PublishToggleButton
+                                published={fc.published}
+                                onToggle={() =>
+                                  void saveFlashcardDoc(
+                                    { ...fc, published: !fc.published },
+                                    fc.published ? 'unpublish' : 'publish'
+                                  )
+                                }
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <ActionButtons
+                                onEdit={() => setFlashcardModal({ mode: 'edit', item: { ...fc } })}
+                                onDelete={() =>
+                                  setDeleteTarget({
+                                    kind: 'flashcards',
+                                    id: fc.id,
+                                    label: fc.front.slice(0, 60),
+                                    isPublished: fc.published,
+                                  })
+                                }
+                              />
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -4821,6 +5218,66 @@ export const AdminPage: React.FC = () => {
                 </div>
               </div>
 
+              <div className="sm:col-span-12 rounded-xl border border-slate-200 bg-white p-3 dark:border-[#24385c] dark:bg-[#122443]">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-center">
+                  <div className="sm:col-span-5">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-[#102544] dark:text-[#facc15]">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(testModal.item.isMegaMock)}
+                        onChange={(e) =>
+                          setTestModal({
+                            ...testModal,
+                            item: { ...testModal.item, isMegaMock: e.target.checked },
+                          })
+                        }
+                        className="h-4 w-4 accent-[#102544]"
+                      />
+                      <span>Feature as Mega Live Mock (Home Countdown)</span>
+                    </label>
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                      Shows a live countdown banner on the Homepage &amp; highlights this test.
+                    </p>
+                  </div>
+                  <div className="sm:col-span-7">
+                    <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <CalendarClock className="h-3.5 w-3.5 text-[#102544] dark:text-[#facc15]" />
+                      <span>Scheduled Unlock Date &amp; Time (Optional — locks test until countdown hits 0)</span>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="datetime-local"
+                        value={toDatetimeLocalValue(testModal.item.scheduledAt)}
+                        onChange={(e) =>
+                          setTestModal({
+                            ...testModal,
+                            item: {
+                              ...testModal.item,
+                              scheduledAt: fromDatetimeLocalValue(e.target.value),
+                            },
+                          })
+                        }
+                        className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 font-mono-num text-xs dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+                      />
+                      {testModal.item.scheduledAt && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setTestModal({
+                              ...testModal,
+                              item: { ...testModal.item, scheduledAt: undefined },
+                            })
+                          }
+                          className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-[#24385c] dark:text-slate-300 dark:hover:bg-[#16294b]"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-12">
                 <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm">
                   <span className="font-semibold text-slate-600 dark:text-[#9fb0c8]">
@@ -5100,6 +5557,132 @@ export const AdminPage: React.FC = () => {
         </ModalShell>
         );
       })()}
+
+      {/* Quick Revision Flashcard Modal */}
+      {flashcardModal && (
+        <ModalShell
+          title={flashcardModal.mode === 'add' ? 'Add Flashcard' : 'Edit Flashcard'}
+          onClose={() => setFlashcardModal(null)}
+        >
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!flashcardModal.item.front.trim() || !flashcardModal.item.back.trim()) return;
+              setSavingBusy(true);
+              try {
+                await saveFlashcardDoc(
+                  flashcardModal.item,
+                  flashcardModal.mode === 'add' ? 'create' : 'update'
+                );
+                setFlashcardModal(null);
+                showToast('Flashcard saved to Firebase!');
+              } finally {
+                setSavingBusy(false);
+              }
+            }}
+            className="space-y-3"
+          >
+            <div>
+              <label className="mb-1 block text-xs font-semibold">Category</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Polity, History, WB GK, Computer, Science"
+                value={flashcardModal.item.category}
+                onChange={(e) =>
+                  setFlashcardModal({
+                    ...flashcardModal,
+                    item: { ...flashcardModal.item, category: e.target.value },
+                  })
+                }
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold">Front (Question / Concept)</label>
+              <textarea
+                rows={3}
+                required
+                value={flashcardModal.item.front}
+                onChange={(e) =>
+                  setFlashcardModal({
+                    ...flashcardModal,
+                    item: { ...flashcardModal.item, front: e.target.value },
+                  })
+                }
+                placeholder="Enter the short question or memory trigger..."
+                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold">Back (One-Liner Answer / Fact)</label>
+              <textarea
+                rows={3}
+                required
+                value={flashcardModal.item.back}
+                onChange={(e) =>
+                  setFlashcardModal({
+                    ...flashcardModal,
+                    item: { ...flashcardModal.item, back: e.target.value },
+                  })
+                }
+                placeholder="Enter the crisp answer students see when they flip..."
+                className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold">Exam Tip / Memory Hint (Optional)</label>
+              <input
+                type="text"
+                value={flashcardModal.item.hint || ''}
+                onChange={(e) =>
+                  setFlashcardModal({
+                    ...flashcardModal,
+                    item: { ...flashcardModal.item, hint: e.target.value },
+                  })
+                }
+                placeholder="e.g. Asked in WBCS Prelims & SSC CGL 2024"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm dark:border-[#24385c] dark:bg-[#16294b] dark:text-white"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={flashcardModal.item.published}
+                onChange={(e) =>
+                  setFlashcardModal({
+                    ...flashcardModal,
+                    item: { ...flashcardModal.item, published: e.target.checked },
+                  })
+                }
+                className="h-4 w-4 accent-[#102544]"
+              />
+              <span>{t.common.published}</span>
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setFlashcardModal(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold dark:border-[#24385c]"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="submit"
+                disabled={savingBusy}
+                className="rounded-xl bg-[#102544] px-4 py-2 text-sm font-bold text-white disabled:opacity-60 dark:bg-[#facc15] dark:text-[#102544]"
+              >
+                {savingBusy ? 'Saving…' : t.common.save}
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      )}
 
       {/* Study Material + PDF Upload Modal */}
       {materialModal && (

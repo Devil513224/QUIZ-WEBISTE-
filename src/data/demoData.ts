@@ -44,7 +44,19 @@ export interface TestDefinition {
   note?: string;
   questionLimit?: number;
   shuffle?: boolean;
+  scheduledAt?: string;
+  isMegaMock?: boolean;
   published?: boolean;
+  updatedAt?: string;
+}
+
+export interface FlashcardItem {
+  id: string;
+  category: string;
+  front: string;
+  back: string;
+  hint?: string;
+  published: boolean;
   updatedAt?: string;
 }
 
@@ -545,6 +557,119 @@ export const INITIAL_TESTS: TestDefinition[] = [
     minutes: 40,
     negativeMarking: 0.25,
     note: 'Sample paper in previous-year format (Demo only).',
+    published: true,
+  },
+  {
+    id: 'mega_sunday',
+    type: 'Mock Test',
+    name: 'All-India & WB Sunday Mega Live Mock Test',
+    subjectKeys: ['gk', 'cs'],
+    examIds: ['ssc', 'wb', 'railway', 'police'],
+    questionCount: 50,
+    minutes: 45,
+    negativeMarking: 0.25,
+    note: 'Weekly Live Mega Mock Challenge — unlocks automatically at the scheduled time.',
+    scheduledAt: '2026-11-29T10:00:00+05:30',
+    isMegaMock: true,
+    published: true,
+  },
+];
+
+export const INITIAL_FLASHCARDS: FlashcardItem[] = [
+  {
+    id: 'fc1',
+    category: 'Polity',
+    front: 'Which Article of the Indian Constitution abolishes Untouchability?',
+    back: 'Article 17 (Right to Equality, Fundamental Rights Part III)',
+    hint: 'Part III · Articles 14–18 deal with Right to Equality',
+    published: true,
+  },
+  {
+    id: 'fc2',
+    category: 'Polity',
+    front: 'Which Constitutional Amendment lowered the voting age from 21 to 18 years?',
+    back: '61st Constitutional Amendment Act, 1988 (came into force in 1989)',
+    hint: 'Amended Article 326 of the Constitution',
+    published: true,
+  },
+  {
+    id: 'fc3',
+    category: 'History',
+    front: 'In which year did the Battle of Plassey take place, and between whom?',
+    back: '23 June 1757 — British East India Company (Robert Clive) vs Siraj-ud-Daulah',
+    hint: 'Fought on the banks of the Bhagirathi-Hooghly river in Bengal',
+    published: true,
+  },
+  {
+    id: 'fc4',
+    category: 'History',
+    front: 'Who founded the Forward Bloc in 1939?',
+    back: 'Netaji Subhas Chandra Bose (after Tripuri Congress Session)',
+    hint: 'Formed on 3 May 1939',
+    published: true,
+  },
+  {
+    id: 'fc5',
+    category: 'WB GK',
+    front: 'Which river is known as the "Sorrow of Bengal"?',
+    back: 'Damodar River (originates in Chotanagpur Plateau, Jharkhand)',
+    hint: 'Controlled later by DVC (Damodar Valley Corporation, 1948)',
+    published: true,
+  },
+  {
+    id: 'fc6',
+    category: 'WB GK',
+    front: 'Where is the Sundarbans Biosphere Reserve located & when did it become a UNESCO Site?',
+    back: 'South 24 Parganas & North 24 Parganas, West Bengal — UNESCO World Heritage Site (1987)',
+    hint: 'Famous for Royal Bengal Tiger & Mangrove forests',
+    published: true,
+  },
+  {
+    id: 'fc7',
+    category: 'Computer',
+    front: 'What is the full form of HTTP and what default port does HTTPS use?',
+    back: 'HyperText Transfer Protocol · HTTPS uses Port 443 (HTTP uses Port 80)',
+    hint: 'TLS/SSL encrypts HTTPS traffic',
+    published: true,
+  },
+  {
+    id: 'fc8',
+    category: 'Computer',
+    front: 'What is the shortcut key to rename a selected file/folder in Windows?',
+    back: 'F2 key (and Alt + F4 closes active window)',
+    hint: 'Function keys F1 = Help, F2 = Rename, F5 = Refresh',
+    published: true,
+  },
+  {
+    id: 'fc9',
+    category: 'Science',
+    front: 'What is the SI unit of Electric Resistance and Power?',
+    back: 'Resistance: Ohm (Ω) · Electric Power: Watt (W)',
+    hint: 'Ohm’s Law: V = I × R',
+    published: true,
+  },
+  {
+    id: 'fc10',
+    category: 'Science',
+    front: 'Which vitamin deficiency causes Scurvy, and what is its chemical name?',
+    back: 'Vitamin C (Ascorbic Acid) — abundant in citrus fruits & Amla',
+    hint: 'Water-soluble vitamins: Vitamin B complex and Vitamin C',
+    published: true,
+  },
+  {
+    id: 'fc11',
+    category: 'Geography',
+    front: 'Which is the longest river flowing entirely within India?',
+    back: 'Godavari River (approx. 1,465 km — also called "Dakshin Ganga")',
+    hint: 'Originates at Trimbakeshwar in Nashik, Maharashtra',
+    published: true,
+  },
+  {
+    id: 'fc12',
+    category: 'Economy',
+    front: 'When was the Reserve Bank of India (RBI) established and nationalized?',
+    back: 'Established: 1 April 1935 (Hilton Young Commission) · Nationalized: 1 January 1949',
+    hint: 'Current HQ: Mumbai (shifted from Kolkata in 1937)',
     published: true,
   },
 ];

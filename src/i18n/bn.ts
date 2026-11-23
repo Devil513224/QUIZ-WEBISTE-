@@ -394,6 +394,7 @@ export const bn: TranslationSchema = {
       qb: 'প্রশ্ন ব্যাংক',
       quizzes: 'কুইজ',
       mocks: 'মক টেস্ট',
+      flashcards: 'ফ্ল্যাশকার্ড',
       materials: 'স্টাডি ম্যাটেরিয়াল',
       courses: 'কোর্স',
       affairs: 'কারেন্ট অ্যাফেয়ার্স',

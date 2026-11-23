@@ -160,7 +160,7 @@ service cloud.firestore {
 
     function isValidTest(data) {
       return data.keys().hasAll(['id', 'type', 'name', 'subjectKeys', 'minutes', 'negativeMarking', 'published', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'scheduledAt', 'isMegaMock', 'published', 'updatedAt'])
         && isValidId(data.id)
         && (data.type == 'Daily Quiz' || data.type == 'Mock Test' || data.type == 'Sectional Test' || data.type == 'Previous-Year Paper' || data.type == 'Custom Practice')
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 160
@@ -172,6 +172,20 @@ service cloud.firestore {
         && (data.negativeMarking is int || data.negativeMarking is float) && data.negativeMarking >= 0 && data.negativeMarking <= 5
         && (!('shuffle' in data) || data.shuffle is bool)
         && isOptString(data, 'note', 400)
+        && isOptString(data, 'scheduledAt', 64)
+        && (!('isMegaMock' in data) || data.isMegaMock is bool)
+        && data.published is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFlashcard(data) {
+      return data.keys().hasAll(['id', 'category', 'front', 'back', 'published', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'category', 'front', 'back', 'hint', 'published', 'updatedAt'])
+        && isValidId(data.id)
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 60
+        && data.front is string && data.front.size() >= 2 && data.front.size() <= 400
+        && data.back is string && data.back.size() >= 1 && data.back.size() <= 600
+        && isOptString(data, 'hint', 240)
         && data.published is bool
         && data.updatedAt is timestamp;
     }
@@ -503,7 +517,7 @@ service cloud.firestore {
       allow create: if isValidId(testId) && isAdmin() && isValidTest(incoming()) && incoming().updatedAt == request.time;
       allow update: if isValidId(testId) && isAdmin() && isValidTest(incoming())
         && incoming().id == existing().id && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'published', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['type', 'name', 'subjectKeys', 'examIds', 'questionIds', 'questionCount', 'minutes', 'negativeMarking', 'shuffle', 'note', 'scheduledAt', 'isMegaMock', 'published', 'updatedAt']);
       allow delete: if isValidId(testId) && isAdmin();
     }
 
@@ -683,6 +697,17 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'updatedAt'])
         && incoming().totalVisits == existing().totalVisits + 1;
       allow delete: if isValidId(statId) && isSuperAdmin();
+    }
+
+    // Quick Revision Flashcards (Published readable publicly, Admin CRUD)
+    match /flashcards/{cardId} {
+      allow get: if isValidId(cardId) && (existing().published == true || isAdmin());
+      allow list: if existing().published == true || isAdmin();
+      allow create: if isValidId(cardId) && isAdmin() && isValidFlashcard(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(cardId) && isAdmin() && isValidFlashcard(incoming())
+        && incoming().id == existing().id && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['category', 'front', 'back', 'hint', 'published', 'updatedAt']);
+      allow delete: if isValidId(cardId) && isAdmin();
     }
   }
 }

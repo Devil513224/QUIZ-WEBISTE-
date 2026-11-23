@@ -50,6 +50,14 @@ const ROUTE_SEO_MAP: Array<{ match: (path: string) => boolean; meta: RouteSeoMet
     },
   },
   {
+    match: (p) => p.startsWith('/flashcards'),
+    meta: {
+      title: 'Quick Revision Flashcards – Learn With TG',
+      description:
+        'Revise Polity articles, History timelines, WB GK, Science, and Computer shortcuts with interactive flip flashcards.',
+    },
+  },
+  {
     match: (p) => p.startsWith('/typing'),
     meta: {
       title: 'Typing Speed & Accuracy Practice – Learn With TG',

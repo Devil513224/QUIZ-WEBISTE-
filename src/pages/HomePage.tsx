@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Layers, Search } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DemoLabel, EmptyState } from '../components/CommonUI';
+import { MegaMockBanner } from '../components/MegaMockBanner';
 import { EXAM_CATEGORIES, LEADERBOARD_DATA } from '../data/demoData';
 
 export const HomePage: React.FC = () => {
@@ -330,6 +331,9 @@ export const HomePage: React.FC = () => {
         </section>
       )}
 
+      {/* Live Countdown Mega Mock Test */}
+      <MegaMockBanner />
+
       {/* Exam Categories */}
       {isSectionVisible('exams') && (
         <section id="exam-categories" className="py-14">
@@ -591,6 +595,35 @@ export const HomePage: React.FC = () => {
                 ))}
               </div>
               <p className="mt-2 text-xs text-slate-500 dark:text-[#9fb0c8]">{t.home.sampleDataOnly}</p>
+            </div>
+          </div>
+
+          {/* Quick Revision Flashcards Strip */}
+          <div className="mx-auto mt-10 max-w-7xl px-4 sm:px-6">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center dark:border-[#24385c] dark:bg-[#122443]">
+              <div className="flex items-start gap-3.5">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#eef2f8] text-[#102544] dark:bg-[#16294b] dark:text-[#facc15]">
+                  <Layers className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-display text-lg font-extrabold text-slate-900 dark:text-white">
+                    Quick Revision Flashcards
+                  </h3>
+                  <p className="mt-0.5 text-sm text-slate-600 dark:text-[#9fb0c8]">
+                    Flip through{' '}
+                    <strong className="font-mono-num text-slate-900 dark:text-white">
+                      {state.flashcards.filter((fc) => fc.published !== false).length}
+                    </strong>{' '}
+                    one-liner cards covering Polity Articles, History, WB GK, Science &amp; Computer shortcuts in 5 minutes.
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/flashcards"
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-[#102544] px-5 text-xs font-bold text-white transition-colors hover:bg-[#1b3a6b] sm:text-sm dark:bg-[#facc15] dark:text-[#102544]"
+              >
+                Open Flashcards
+              </Link>
             </div>
           </div>
         </section>

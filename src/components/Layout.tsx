@@ -87,6 +87,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const secondaryLinks = [
     { to: '/courses', label: t.nav.courses },
+    { to: '/flashcards', label: 'Flashcards' },
     { to: '/affairs', label: t.nav.affairs },
     { to: '/jobs', label: t.nav.jobs },
     { to: '/typing', label: t.nav.typing },
@@ -421,6 +422,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <div>
               <h4 className="mb-3 font-display text-sm font-bold text-white">{t.footer.toolsCol}</h4>
               <ul className="space-y-2 text-sm">
+                <li><Link to="/flashcards" className="hover:text-[#facc15]">Flashcards</Link></li>
                 <li><Link to="/typing" className="hover:text-[#facc15]">{t.nav.typing}</Link></li>
                 <li><Link to="/planner" className="hover:text-[#facc15]">{t.nav.planner}</Link></li>
                 <li><Link to="/affairs" className="hover:text-[#facc15]">{t.nav.affairs}</Link></li>
