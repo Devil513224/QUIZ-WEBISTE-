@@ -148,6 +148,28 @@ const CATALOG_MODAL_LABELS: Record<'exams' | 'subjects' | 'categories' | 'sitese
   sitesettings: { add: 'Add Setting', edit: 'Edit Setting' },
 };
 
+const SECTION_GUIDE: Record<SectionKey, string> = {
+  dash: 'Everything in one place. Use Quick Actions below to add content or open any section.',
+  students: 'View registered learners, activate or suspend access, and manage account roles.',
+  exams: 'Add or edit the exam list shown to students on the Explore Exams page.',
+  subjects: 'Manage study subjects used across quizzes, mocks, and notes.',
+  categories: 'Organize content categories across the website.',
+  qb: 'Create single or bulk MCQs in English, Bengali, or Hindi for quizzes and mock tests.',
+  quizzes: 'Manage Daily Quizzes. Students see published quizzes immediately on the Quizzes page.',
+  mocks: 'Manage full-length Mock Tests, Sectional Tests, and Previous-Year Papers.',
+  materials: 'Upload PDF study notes or attach external PDF links for students to read and save.',
+  courses: 'Create free video/lesson courses and manage their lesson checklists.',
+  affairs: 'Post Daily, Weekly, or Monthly current affairs headlines and summaries.',
+  jobs: 'Publish government job vacancies, admit cards, results, answer keys, and exam dates.',
+  typing: 'Add English, Bengali, or Hindi passages for the 60-second typing practice tool.',
+  banners: 'Edit the promotional hero banners displayed on the website.',
+  hb: 'Reorder, rename, or show/hide sections on the website homepage.',
+  notify: 'Send announcements and exam alerts to the website notification bell.',
+  reports: 'Track and publish platform summary reports.',
+  sitesettings: 'Super Admin controls for PDF branding/watermark, social links, welcome popup, and starter data.',
+  logs: 'Read-only audit trail showing who created, edited, published, or deleted items.',
+};
+
 export const AdminPage: React.FC = () => {
   const {
     state,
@@ -197,6 +219,8 @@ export const AdminPage: React.FC = () => {
 
   const [section, setSection] = useState<SectionKey>('dash');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const [settingsTab, setSettingsTab] = useState<'pdf' | 'social' | 'catalog'>('pdf');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [page, setPage] = useState(1);
@@ -711,39 +735,162 @@ export const AdminPage: React.FC = () => {
   }
 
   /* -------------------- AUTHENTICATED ADMIN WORKSPACE -------------------- */
-  const sidebarItems: Array<{ key: SectionKey; label: string; icon: React.ReactNode }> = [
-    { key: 'dash', label: t.admin.sections.dash, icon: <LayoutDashboard className="h-4 w-4" /> },
-    { key: 'students', label: t.admin.sections.students, icon: <Users className="h-4 w-4" /> },
-    { key: 'exams', label: t.admin.sections.exams, icon: <BookOpen className="h-4 w-4" /> },
-    { key: 'subjects', label: t.admin.sections.subjects, icon: <Sliders className="h-4 w-4" /> },
-    { key: 'categories', label: t.admin.sections.categories, icon: <FolderTree className="h-4 w-4" /> },
-    { key: 'qb', label: t.admin.sections.qb, icon: <HelpCircle className="h-4 w-4" /> },
-    { key: 'quizzes', label: t.admin.sections.quizzes, icon: <CheckCircle2 className="h-4 w-4" /> },
-    { key: 'mocks', label: t.admin.sections.mocks, icon: <ClipboardList className="h-4 w-4" /> },
-    { key: 'materials', label: t.admin.sections.materials, icon: <FileText className="h-4 w-4" /> },
-    { key: 'courses', label: t.admin.sections.courses, icon: <Video className="h-4 w-4" /> },
-    { key: 'affairs', label: t.admin.sections.affairs, icon: <Newspaper className="h-4 w-4" /> },
-    { key: 'jobs', label: t.admin.sections.jobs, icon: <Briefcase className="h-4 w-4" /> },
-    { key: 'typing', label: t.admin.sections.typing, icon: <Keyboard className="h-4 w-4" /> },
-    { key: 'banners', label: t.admin.sections.banners, icon: <ImageIcon className="h-4 w-4" /> },
-    { key: 'hb', label: t.admin.sections.hb, icon: <LayoutTemplate className="h-4 w-4" /> },
-    { key: 'notify', label: t.admin.sections.notify, icon: <Bell className="h-4 w-4" /> },
-    { key: 'reports', label: t.admin.sections.reports, icon: <TrendingUp className="h-4 w-4" /> },
+  const dailyQuizCount = state.tests.filter((tItem) => tItem.type === 'Daily Quiz').length;
+  const mockTestCount = state.tests.filter((tItem) => tItem.type !== 'Daily Quiz').length;
+
+  const sidebarGroups: Array<{
+    title: string;
+    items: Array<{ key: SectionKey; label: string; icon: React.ReactNode; count?: number }>;
+  }> = [
+    {
+      title: 'Overview',
+      items: [
+        { key: 'dash', label: t.admin.sections.dash, icon: <LayoutDashboard className="h-4 w-4" /> },
+        {
+          key: 'students',
+          label: t.admin.sections.students,
+          icon: <Users className="h-4 w-4" />,
+          count: (state.adminTables.students || []).length,
+        },
+      ],
+    },
+    {
+      title: 'Tests & Study',
+      items: [
+        {
+          key: 'quizzes',
+          label: t.admin.sections.quizzes,
+          icon: <CheckCircle2 className="h-4 w-4" />,
+          count: dailyQuizCount,
+        },
+        {
+          key: 'mocks',
+          label: t.admin.sections.mocks,
+          icon: <ClipboardList className="h-4 w-4" />,
+          count: mockTestCount,
+        },
+        {
+          key: 'qb',
+          label: t.admin.sections.qb,
+          icon: <HelpCircle className="h-4 w-4" />,
+          count: state.questions.length,
+        },
+        {
+          key: 'materials',
+          label: t.admin.sections.materials,
+          icon: <FileText className="h-4 w-4" />,
+          count: state.materials.length,
+        },
+        {
+          key: 'courses',
+          label: t.admin.sections.courses,
+          icon: <Video className="h-4 w-4" />,
+          count: state.courses.length,
+        },
+      ],
+    },
+    {
+      title: 'News & Alerts',
+      items: [
+        {
+          key: 'affairs',
+          label: t.admin.sections.affairs,
+          icon: <Newspaper className="h-4 w-4" />,
+          count: state.affairs.length,
+        },
+        {
+          key: 'jobs',
+          label: t.admin.sections.jobs,
+          icon: <Briefcase className="h-4 w-4" />,
+          count: state.jobs.length,
+        },
+        {
+          key: 'notify',
+          label: t.admin.sections.notify,
+          icon: <Bell className="h-4 w-4" />,
+          count: state.notificationsList.length,
+        },
+        {
+          key: 'typing',
+          label: t.admin.sections.typing,
+          icon: <Keyboard className="h-4 w-4" />,
+          count: state.typingPassages.length,
+        },
+      ],
+    },
+    {
+      title: 'Website & Lists',
+      items: [
+        {
+          key: 'banners',
+          label: t.admin.sections.banners,
+          icon: <ImageIcon className="h-4 w-4" />,
+          count: state.banners.length,
+        },
+        {
+          key: 'hb',
+          label: t.admin.sections.hb,
+          icon: <LayoutTemplate className="h-4 w-4" />,
+          count: state.homepageSections.length,
+        },
+        {
+          key: 'exams',
+          label: t.admin.sections.exams,
+          icon: <BookOpen className="h-4 w-4" />,
+          count: (state.adminTables.exams || []).length,
+        },
+        {
+          key: 'subjects',
+          label: t.admin.sections.subjects,
+          icon: <Sliders className="h-4 w-4" />,
+          count: (state.adminTables.subjects || []).length,
+        },
+        {
+          key: 'categories',
+          label: t.admin.sections.categories,
+          icon: <FolderTree className="h-4 w-4" />,
+          count: (state.adminTables.categories || []).length,
+        },
+        {
+          key: 'reports',
+          label: t.admin.sections.reports,
+          icon: <TrendingUp className="h-4 w-4" />,
+          count: (state.adminTables.reports || []).length,
+        },
+      ],
+    },
     ...(isSuperAdmin
       ? [
           {
-            key: 'sitesettings' as SectionKey,
-            label: t.admin.sections.sitesettings,
-            icon: <Settings className="h-4 w-4" />,
-          },
-          {
-            key: 'logs' as SectionKey,
-            label: t.admin.sections.logs,
-            icon: <FileText className="h-4 w-4" />,
+            title: 'Super Admin',
+            items: [
+              {
+                key: 'sitesettings' as SectionKey,
+                label: t.admin.sections.sitesettings,
+                icon: <Settings className="h-4 w-4" />,
+              },
+              {
+                key: 'logs' as SectionKey,
+                label: t.admin.sections.logs,
+                icon: <FileText className="h-4 w-4" />,
+                count: (state.adminTables.logs || []).length,
+              },
+            ],
           },
         ]
       : []),
   ];
+
+  const filteredSidebarGroups = sidebarGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) =>
+          !sidebarSearch.trim() ||
+          item.label.toLowerCase().includes(sidebarSearch.trim().toLowerCase())
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const switchSection = (key: SectionKey) => {
     if (!isSuperAdmin && (key === 'sitesettings' || key === 'logs')) return;
@@ -924,22 +1071,62 @@ export const AdminPage: React.FC = () => {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-3" aria-label="Admin sections">
-          {sidebarItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => switchSection(item.key)}
-              className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs sm:text-sm font-medium transition-colors ${
-                section === item.key
-                  ? 'bg-[#facc15] font-bold text-[#102544]'
-                  : 'text-slate-200 hover:bg-[#1b3a6b]'
-              }`}
-            >
-              {item.icon}
-              <span className="truncate">{item.label}</span>
-            </button>
-          ))}
+        <div className="border-b border-[#24385c] px-3 py-2.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={sidebarSearch}
+              onChange={(e) => setSidebarSearch(e.target.value)}
+              placeholder="Find menu…"
+              aria-label="Find admin section"
+              className="h-8 w-full rounded-lg border border-[#24385c] bg-[#0b1730] pl-8 pr-2.5 text-xs text-white placeholder:text-slate-400 focus:border-[#facc15] focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <nav className="flex-1 space-y-4 overflow-y-auto p-3" aria-label="Admin sections">
+          {filteredSidebarGroups.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-slate-400">
+              No matching menu item.
+            </p>
+          ) : (
+            filteredSidebarGroups.map((group) => (
+              <div key={group.title}>
+                <div className="mb-1 px-2.5 text-[11px] font-semibold tracking-wide text-slate-400">
+                  {group.title}
+                </div>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => switchSection(item.key)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs sm:text-sm transition-colors ${
+                        section === item.key
+                          ? 'bg-[#facc15] font-bold text-[#102544]'
+                          : 'font-medium text-slate-200 hover:bg-[#1b3a6b]'
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                      {item.count !== undefined && (
+                        <span
+                          className={`shrink-0 font-mono-num text-[11px] ${
+                            section === item.key ? 'font-bold text-[#102544]/80' : 'text-slate-400'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </nav>
       </aside>
 
@@ -947,26 +1134,50 @@ export const AdminPage: React.FC = () => {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar */}
         <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 dark:border-[#24385c] dark:bg-[#122443]">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
               aria-label={t.nav.menu}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 lg:hidden dark:border-[#24385c] dark:text-slate-200"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-700 lg:hidden dark:border-[#24385c] dark:text-slate-200"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div>
-              <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                Firebase Connected · {firebaseUser.email} ({isSuperAdmin ? 'Super Admin' : 'Admin'})
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-[#9fb0c8]">
+                {section !== 'dash' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => switchSection('dash')}
+                      className="font-semibold text-[#102544] hover:underline dark:text-[#facc15]"
+                    >
+                      Dashboard
+                    </button>
+                    <span aria-hidden="true">/</span>
+                  </>
+                )}
+                <span className="truncate">
+                  {firebaseUser.email} · {isSuperAdmin ? 'Super Admin' : 'Admin'}
+                </span>
               </div>
-              <h1 className="font-display text-lg font-extrabold text-slate-900 dark:text-white">
+              <h1 className="truncate font-display text-lg font-extrabold text-slate-900 dark:text-white">
                 {t.admin.sections[section]}
               </h1>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {section !== 'dash' && (
+              <button
+                type="button"
+                onClick={() => switchSection('dash')}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
+              >
+                <LayoutDashboard className="h-3.5 w-3.5" />
+                <span>All Tools</span>
+              </button>
+            )}
 
             <div className="relative flex items-center">
               <Globe className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-slate-500 dark:text-[#9fb0c8]" />
@@ -996,7 +1207,7 @@ export const AdminPage: React.FC = () => {
             <button
               type="button"
               onClick={() => void signOutUser()}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Sign out</span>
@@ -1004,7 +1215,7 @@ export const AdminPage: React.FC = () => {
 
             <Link
               to="/"
-              className="inline-flex h-9 items-center rounded-lg bg-[#102544] px-3.5 text-xs font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+              className="inline-flex h-9 items-center rounded-lg bg-[#102544] px-3.5 text-xs font-bold text-white hover:bg-[#1b3a6b] whitespace-nowrap dark:bg-[#facc15] dark:text-[#102544]"
             >
               {t.admin.viewWebsite}
             </Link>
@@ -1012,27 +1223,204 @@ export const AdminPage: React.FC = () => {
         </header>
 
         {/* Body */}
-        <div className="flex-1 p-4 sm:p-6">
+        <div className="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-6">
+          {/* Plain-English Section Guide */}
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600 dark:border-[#24385c] dark:bg-[#122443] dark:text-[#9fb0c8]">
+            <span>{SECTION_GUIDE[section]}</span>
+            {section === 'dash' && (
+              <button
+                type="button"
+                disabled={countsLoading}
+                onClick={() => void loadDashboardCounts()}
+                className="inline-flex items-center gap-1.5 font-semibold text-[#102544] hover:underline disabled:opacity-60 dark:text-[#facc15]"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${countsLoading ? 'animate-spin' : ''}`} />
+                <span>{countsLoading ? 'Refreshing…' : 'Refresh counts'}</span>
+              </button>
+            )}
+          </div>
+
           {/* 1. DASHBOARD */}
           {section === 'dash' && (
             <div className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-600 dark:text-[#9fb0c8]">
-                  Live collection totals powered by Firestore count queries.
-                </p>
-                <button
-                  type="button"
-                  disabled={countsLoading}
-                  onClick={() => void loadDashboardCounts()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-[#24385c] dark:bg-[#122443] dark:text-slate-200"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${countsLoading ? 'animate-spin' : ''}`} />
-                  <span>{countsLoading ? 'Refreshing…' : 'Refresh counts'}</span>
-                </button>
+              {/* Step 1: Quick Actions */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-[#24385c] dark:bg-[#122443]">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
+                    Quick Actions — Add Something New
+                  </h2>
+                  <span className="text-xs text-slate-500 dark:text-[#9fb0c8]">
+                    Click any button to open the form right away
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTestModal({
+                        mode: 'add',
+                        item: {
+                          id: `tst_${Date.now()}`,
+                          type: 'Daily Quiz',
+                          name: '',
+                          subjectKeys: ['gk', 'cs'],
+                          examIds: [],
+                          questionIds: [],
+                          questionCount: 10,
+                          minutes: 5,
+                          negativeMarking: 0,
+                          shuffle: true,
+                          note: '',
+                          published: true,
+                        },
+                        tab: 'bulk',
+                        bulkSubjectKey: 'gk',
+                        bulkLanguage: 'English',
+                        bulkText: '',
+                        correctOverrides: {},
+                        bankSearch: '',
+                      })
+                    }
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <CheckCircle2 className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Add Quiz</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Daily practice set</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTestModal({
+                        mode: 'add',
+                        item: {
+                          id: `tst_${Date.now()}`,
+                          type: 'Mock Test',
+                          name: '',
+                          subjectKeys: ['gk'],
+                          examIds: [],
+                          questionIds: [],
+                          questionCount: 50,
+                          minutes: 40,
+                          negativeMarking: 0.25,
+                          shuffle: false,
+                          note: '',
+                          published: true,
+                        },
+                        tab: 'bulk',
+                        bulkSubjectKey: 'gk',
+                        bulkLanguage: 'English',
+                        bulkText: '',
+                        correctOverrides: {},
+                        bankSearch: '',
+                      })
+                    }
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <ClipboardList className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Add Mock Test</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Full exam paper</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBulkQbModal({
+                        subjectKey: 'gk',
+                        language: 'English',
+                        published: true,
+                        rawText: '',
+                        correctOverrides: {},
+                      })
+                    }
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <HelpCircle className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Paste Questions</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Bulk MCQ import</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPdfUploadError(null);
+                      setMaterialModal({
+                        mode: 'add',
+                        item: {
+                          id: `mat_${Date.now()}`,
+                          title: '',
+                          subject: 'General Knowledge',
+                          pages: 20,
+                          summary: '',
+                          published: true,
+                        },
+                      });
+                    }}
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <Upload className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Upload PDF</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Study material note</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setJobModal({
+                        mode: 'add',
+                        item: {
+                          id: `job_${Date.now()}`,
+                          tab: 'Vacancies',
+                          title: '',
+                          organization: '',
+                          publishedDate: new Date().toISOString().slice(0, 10),
+                          startDate: new Date().toISOString().slice(0, 10),
+                          deadline: '2026-12-30',
+                          eligibility: '',
+                          officialLink: '',
+                          published: true,
+                        },
+                      })
+                    }
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <Briefcase className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Add Job Update</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Vacancy / Result</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAffairModal({
+                        mode: 'add',
+                        item: {
+                          id: `ca_${Date.now()}`,
+                          title: '',
+                          category: 'Economy',
+                          period: 'Daily',
+                          date: new Date().toISOString().slice(0, 10),
+                          summary: '',
+                          published: true,
+                        },
+                      })
+                    }
+                    className="flex flex-col items-start gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-[#102544] hover:bg-[#eef2f8] dark:border-[#24385c] dark:bg-[#16294b] dark:hover:border-[#facc15]"
+                  >
+                    <Newspaper className="h-4 w-4 text-[#102544] dark:text-[#facc15]" />
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">Current Affair</span>
+                    <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">Daily GK news</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
+              {/* Step 2: Live Numbers */}
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <button
+                  type="button"
+                  onClick={() => switchSection('students')}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-[#102544] dark:border-[#24385c] dark:bg-[#122443] dark:hover:border-[#facc15]"
+                >
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Registered Students</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
                     {dashboardCounts ? dashboardCounts.studentsTotal : '…'}
@@ -1042,17 +1430,25 @@ export const AdminPage: React.FC = () => {
                       ? `${dashboardCounts.studentsActive} active · ${dashboardCounts.studentsSuspended} suspended`
                       : 'Counting…'}
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
-                  <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Quizzes & Mocks</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchSection('quizzes')}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-[#102544] dark:border-[#24385c] dark:bg-[#122443] dark:hover:border-[#facc15]"
+                >
+                  <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Quizzes &amp; Mocks</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
                     {dashboardCounts ? dashboardCounts.testsTotal : '…'}
                   </div>
                   <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
                     {dashboardCounts ? `${dashboardCounts.testsPublished} published` : 'Counting…'}
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchSection('qb')}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-[#102544] dark:border-[#24385c] dark:bg-[#122443] dark:hover:border-[#facc15]"
+                >
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">{t.admin.totalQuestions}</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
                     {dashboardCounts ? dashboardCounts.questionsTotal : '…'}
@@ -1060,8 +1456,12 @@ export const AdminPage: React.FC = () => {
                   <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
                     {dashboardCounts ? `${dashboardCounts.questionsPublished} published` : 'Counting…'}
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchSection('materials')}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-[#102544] dark:border-[#24385c] dark:bg-[#122443] dark:hover:border-[#facc15]"
+                >
                   <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">Study Materials / PDFs</div>
                   <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
                     {dashboardCounts ? dashboardCounts.materialsTotal : '…'}
@@ -1069,22 +1469,134 @@ export const AdminPage: React.FC = () => {
                   <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
                     {dashboardCounts ? `${dashboardCounts.materialsPublished} published` : 'Counting…'}
                   </div>
-                </div>
-                <div className="col-span-2 lg:col-span-1 rounded-2xl border border-slate-200 bg-white p-4 dark:border-[#24385c] dark:bg-[#122443]">
-                  <div className="text-xs text-slate-500 dark:text-[#9fb0c8]">{t.admin.totalBanners}</div>
-                  <div className="mt-1 font-mono-num text-2xl font-extrabold text-slate-900 dark:text-white">
-                    {dashboardCounts ? dashboardCounts.bannersTotal : '…'}
-                  </div>
-                  <div className="mt-1 font-mono-num text-[11px] text-slate-500 dark:text-[#9fb0c8]">
-                    {dashboardCounts ? `${dashboardCounts.bannersPublished} published` : 'Counting…'}
-                  </div>
+                </button>
+              </div>
+
+              {/* Step 3: Manage Everything Directory */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-[#24385c] dark:bg-[#122443]">
+                <h2 className="mb-3 font-display text-base font-bold text-slate-900 dark:text-white">
+                  Manage Sections — Click to Open
+                </h2>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    {
+                      key: 'quizzes' as SectionKey,
+                      title: 'Quizzes',
+                      hint: 'Daily practice sets',
+                      stat: `${dailyQuizCount} sets`,
+                    },
+                    {
+                      key: 'mocks' as SectionKey,
+                      title: 'Mock Tests',
+                      hint: 'Full & sectional exams',
+                      stat: `${mockTestCount} tests`,
+                    },
+                    {
+                      key: 'courses' as SectionKey,
+                      title: 'Courses',
+                      hint: 'Lesson playlists',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.coursesPublished}/${dashboardCounts.coursesTotal} live`
+                          : `${state.courses.length} items`,
+                    },
+                    {
+                      key: 'affairs' as SectionKey,
+                      title: 'Current Affairs',
+                      hint: 'Daily/Monthly GK',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.affairsPublished}/${dashboardCounts.affairsTotal} live`
+                          : `${state.affairs.length} items`,
+                    },
+                    {
+                      key: 'jobs' as SectionKey,
+                      title: 'Job Updates',
+                      hint: 'Vacancies & results',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.jobsPublished}/${dashboardCounts.jobsTotal} live`
+                          : `${state.jobs.length} items`,
+                    },
+                    {
+                      key: 'notify' as SectionKey,
+                      title: 'Notifications',
+                      hint: 'Bell alerts for users',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.notificationsPublished}/${dashboardCounts.notificationsTotal} live`
+                          : `${state.notificationsList.length} items`,
+                    },
+                    {
+                      key: 'typing' as SectionKey,
+                      title: 'Typing Passages',
+                      hint: 'EN / BN / HI tests',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.typingPublished}/${dashboardCounts.typingTotal} live`
+                          : `${state.typingPassages.length} items`,
+                    },
+                    {
+                      key: 'banners' as SectionKey,
+                      title: 'Banners & Homepage',
+                      hint: 'Hero slides & layout',
+                      stat:
+                        dashboardCounts !== null
+                          ? `${dashboardCounts.bannersPublished}/${dashboardCounts.bannersTotal} banners`
+                          : `${state.banners.length} banners`,
+                    },
+                    {
+                      key: 'exams' as SectionKey,
+                      title: 'Exams, Subjects & Categories',
+                      hint: 'Catalog lists & syllabus',
+                      stat: `${(state.adminTables.exams || []).length} exams`,
+                    },
+                    ...(isSuperAdmin
+                      ? [
+                          {
+                            key: 'sitesettings' as SectionKey,
+                            title: 'Website Settings',
+                            hint: 'PDF logo, links & popup',
+                            stat: 'Super Admin',
+                          },
+                          {
+                            key: 'logs' as SectionKey,
+                            title: 'Activity Logs',
+                            hint: 'Append-only audit trail',
+                            stat:
+                              dashboardCounts !== null
+                                ? `${dashboardCounts.logsTotal} entries`
+                                : `${(state.adminTables.logs || []).length} entries`,
+                          },
+                        ]
+                      : []),
+                  ].map((tile) => (
+                    <button
+                      key={tile.key}
+                      type="button"
+                      onClick={() => switchSection(tile.key)}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3.5 py-2.5 text-left transition-colors hover:border-[#102544] hover:bg-slate-50 dark:border-[#24385c] dark:hover:border-[#facc15] dark:hover:bg-[#16294b]"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                          {tile.title}
+                        </div>
+                        <div className="truncate text-xs text-slate-500 dark:text-[#9fb0c8]">
+                          {tile.hint}
+                        </div>
+                      </div>
+                      <span className="shrink-0 font-mono-num text-xs font-semibold text-slate-600 dark:text-[#facc15]">
+                        {tile.stat}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                 <div className="rounded-2xl border border-slate-200 bg-white p-5 lg:col-span-7 dark:border-[#24385c] dark:bg-[#122443]">
                   <h2 className="mb-4 font-display text-base font-bold text-slate-900 dark:text-white">
-                    Firestore Content Overview (Published vs Draft)
+                    Published vs Draft Overview
                   </h2>
                   <div className="h-64 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -2567,6 +3079,31 @@ export const AdminPage: React.FC = () => {
             return (
               <div className="space-y-6">
                 {section === 'sitesettings' && isSuperAdmin && (
+                  <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 dark:border-[#24385c] dark:bg-[#122443]">
+                    {(
+                      [
+                        { key: 'pdf', label: '1. PDF Logo & Watermark' },
+                        { key: 'social', label: '2. Social Links & Welcome Popup' },
+                        { key: 'catalog', label: '3. General Settings & Starter Sync' },
+                      ] as const
+                    ).map((tabItem) => (
+                      <button
+                        key={tabItem.key}
+                        type="button"
+                        onClick={() => setSettingsTab(tabItem.key)}
+                        className={`rounded-lg px-3.5 py-2 text-xs font-bold transition-colors sm:text-sm ${
+                          settingsTab === tabItem.key
+                            ? 'bg-[#102544] text-white dark:bg-[#facc15] dark:text-[#102544]'
+                            : 'text-slate-600 hover:bg-slate-100 dark:text-[#9fb0c8] dark:hover:bg-[#16294b]'
+                        }`}
+                      >
+                        {tabItem.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {section === 'sitesettings' && isSuperAdmin && settingsTab === 'pdf' && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#24385c] dark:bg-[#122443]">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4 dark:border-[#24385c]">
                       <div>
@@ -3078,7 +3615,7 @@ export const AdminPage: React.FC = () => {
                   </div>
                 )}
 
-                {section === 'sitesettings' && isSuperAdmin && (
+                {section === 'sitesettings' && isSuperAdmin && settingsTab === 'social' && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#24385c] dark:bg-[#122443]">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4 dark:border-[#24385c]">
                       <div>
@@ -3316,7 +3853,7 @@ export const AdminPage: React.FC = () => {
                   </div>
                 )}
 
-                {section === 'sitesettings' && isSuperAdmin && (
+                {section === 'sitesettings' && isSuperAdmin && settingsTab === 'catalog' && (
                   <div className="rounded-2xl border border-amber-300 bg-amber-50/70 p-5 shadow-sm dark:border-amber-700/50 dark:bg-amber-950/20">
                     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                       <div>
@@ -3346,88 +3883,92 @@ export const AdminPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
-                    <StatusFilter
-                      value={statusFilter}
-                      onChange={(v) => { setStatusFilter(v); setPage(1); }}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const blank: GenericRow = { id: `${section}_${Date.now()}`, pub: true };
-                      cols.forEach((c) => {
-                        blank[c.key] = '';
-                      });
-                      setCatalogModal({ mode: 'add', kind: section, row: blank });
-                    }}
-                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>{CATALOG_ADD_LABELS[section]}</span>
-                  </button>
-                </div>
+                {(section !== 'sitesettings' || settingsTab === 'catalog') && (
+                  <>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <SearchBar value={searchTerm} onChange={(v) => { setSearchTerm(v); setPage(1); }} />
+                        <StatusFilter
+                          value={statusFilter}
+                          onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const blank: GenericRow = { id: `${section}_${Date.now()}`, pub: true };
+                          cols.forEach((c) => {
+                            blank[c.key] = '';
+                          });
+                          setCatalogModal({ mode: 'add', kind: section, row: blank });
+                        }}
+                        className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#102544] px-4 text-sm font-bold text-white hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>{CATALOG_ADD_LABELS[section]}</span>
+                      </button>
+                    </div>
 
-                {slice.length === 0 ? (
-                  <EmptyState onReset={resetFilters} />
-                ) : (
-                  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
-                        <tr>
-                          {cols.map((c) => (
-                            <th key={c.key} className="px-4 py-3">{c.label}</th>
-                          ))}
-                          <th className="px-4 py-3">Last updated</th>
-                          <th className="px-4 py-3">{t.common.status}</th>
-                          <th className="px-4 py-3 text-right">{t.common.actions}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
-                        {slice.map((row) => (
-                          <tr key={row.id}>
-                            {cols.map((c) => (
-                              <td key={c.key} className="max-w-xs truncate px-4 py-3 text-slate-800 dark:text-slate-100">
-                                {String(row[c.key] ?? '')}
-                              </td>
+                    {slice.length === 0 ? (
+                      <EmptyState onReset={resetFilters} />
+                    ) : (
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-[#24385c] dark:bg-[#122443]">
+                        <table className="w-full text-left text-sm">
+                          <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-500 dark:border-[#24385c] dark:bg-[#16294b] dark:text-[#9fb0c8]">
+                            <tr>
+                              {cols.map((c) => (
+                                <th key={c.key} className="px-4 py-3">{c.label}</th>
+                              ))}
+                              <th className="px-4 py-3">Last updated</th>
+                              <th className="px-4 py-3">{t.common.status}</th>
+                              <th className="px-4 py-3 text-right">{t.common.actions}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-[#24385c]">
+                            {slice.map((row) => (
+                              <tr key={row.id}>
+                                {cols.map((c) => (
+                                  <td key={c.key} className="max-w-xs truncate px-4 py-3 text-slate-800 dark:text-slate-100">
+                                    {String(row[c.key] ?? '')}
+                                  </td>
+                                ))}
+                                <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
+                                  {row.updatedAt || '—'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <PublishToggleButton
+                                    published={Boolean(row.pub)}
+                                    onToggle={() =>
+                                      void saveCatalogRowDoc(
+                                        section,
+                                        { ...row, pub: !row.pub },
+                                        row.pub ? 'unpublish' : 'publish'
+                                      )
+                                    }
+                                  />
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <ActionButtons
+                                    onEdit={() => setCatalogModal({ mode: 'edit', kind: section, row: { ...row } })}
+                                    onDelete={() =>
+                                      setDeleteTarget({
+                                        kind: section,
+                                        id: row.id,
+                                        label: String(row[cols[0].key] || row.id),
+                                      })
+                                    }
+                                  />
+                                </td>
+                              </tr>
                             ))}
-                            <td className="px-4 py-3 font-mono-num text-xs text-slate-500 dark:text-[#9fb0c8]">
-                              {row.updatedAt || '—'}
-                            </td>
-                            <td className="px-4 py-3">
-                              <PublishToggleButton
-                                published={Boolean(row.pub)}
-                                onToggle={() =>
-                                  void saveCatalogRowDoc(
-                                    section,
-                                    { ...row, pub: !row.pub },
-                                    row.pub ? 'unpublish' : 'publish'
-                                  )
-                                }
-                              />
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <ActionButtons
-                                onEdit={() => setCatalogModal({ mode: 'edit', kind: section, row: { ...row } })}
-                                onDelete={() =>
-                                  setDeleteTarget({
-                                    kind: section,
-                                    id: row.id,
-                                    label: String(row[cols[0].key] || row.id),
-                                  })
-                                }
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
 
-                <PaginationBar page={safePage} totalPages={totalPages} totalCount={totalCount} onPageChange={setPage} />
+                    <PaginationBar page={safePage} totalPages={totalPages} totalCount={totalCount} onPageChange={setPage} />
+                  </>
+                )}
               </div>
             );
           })()}
@@ -4025,8 +4566,16 @@ export const AdminPage: React.FC = () => {
             }}
             className="space-y-4"
           >
-            {/* Top Test Configuration Grid */}
+            {/* Step 1: Test Configuration Grid */}
             <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5 sm:grid-cols-12 dark:border-[#24385c] dark:bg-[#16294b]">
+              <div className="sm:col-span-12 flex items-center justify-between border-b border-slate-200 pb-2 dark:border-[#24385c]">
+                <span className="text-xs font-bold text-[#102544] dark:text-[#facc15]">
+                  Step 1 — Name, Timing &amp; Target Exam
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-[#9fb0c8]">
+                  Fill basic test details first
+                </span>
+              </div>
               <div className="sm:col-span-4">
                 <label className="mb-1 block text-xs font-semibold">Test Title</label>
                 <input
@@ -4307,8 +4856,12 @@ export const AdminPage: React.FC = () => {
               </div>
             )}
 
-            {/* Mode Switcher */}
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2 dark:border-[#24385c]">
+            {/* Step 2: Mode Switcher */}
+            <div className="space-y-2 border-b border-slate-200 pb-2 dark:border-[#24385c]">
+              <div className="text-xs font-bold text-[#102544] dark:text-[#facc15]">
+                Step 2 — Add Questions (Paste New MCQs or Pick from Question Bank)
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setTestModal({ ...testModal, tab: 'bulk' })}
@@ -4337,6 +4890,7 @@ export const AdminPage: React.FC = () => {
                   Existing Question Bank ({(testModal.item.questionIds || []).length} selected)
                 </span>
               </button>
+              </div>
             </div>
 
             {testModal.tab === 'bulk' ? (

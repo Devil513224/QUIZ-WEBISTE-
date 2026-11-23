@@ -324,19 +324,19 @@ interface AppContextValue {
   // Firestore Admin CRUD actions
   saveQuestionDoc: (item: QuestionItem, actionHint?: AdminActionHint) => Promise<void>;
   saveQuestionsBatchDoc: (items: QuestionItem[]) => Promise<string[]>;
-  deleteQuestionDoc: (id: string) => Promise<void>;
+  deleteQuestionDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveTestDoc: (item: TestDefinition, actionHint?: AdminActionHint) => Promise<void>;
-  deleteTestDoc: (id: string) => Promise<void>;
+  deleteTestDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveMaterialDoc: (item: StudyMaterialItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteMaterialDoc: (id: string) => Promise<void>;
+  deleteMaterialDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveCourseDoc: (item: CourseItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteCourseDoc: (id: string) => Promise<void>;
+  deleteCourseDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveAffairDoc: (item: CurrentAffairItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteAffairDoc: (id: string) => Promise<void>;
+  deleteAffairDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveJobDoc: (item: JobUpdateItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteJobDoc: (id: string) => Promise<void>;
+  deleteJobDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveBannerDoc: (item: BannerItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteBannerDoc: (id: string) => Promise<void>;
+  deleteBannerDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveHomepageSectionDoc: (
     item: HomepageSectionItem,
     order: number,
@@ -344,21 +344,29 @@ interface AppContextValue {
   ) => Promise<void>;
   saveHomepageSectionsOrder: (items: HomepageSectionItem[], customLog?: string) => Promise<void>;
   saveNotificationDoc: (item: NotificationItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteNotificationDoc: (docId: string) => Promise<void>;
+  deleteNotificationDoc: (docId: string, displayLabel?: string) => Promise<void>;
   saveTypingPassageDoc: (item: TypingPassageItem, actionHint?: AdminActionHint) => Promise<void>;
-  deleteTypingPassageDoc: (id: string) => Promise<void>;
+  deleteTypingPassageDoc: (id: string, displayLabel?: string) => Promise<void>;
   saveCatalogRowDoc: (
     kind: 'exams' | 'subjects' | 'categories' | 'sitesettings',
     row: GenericRow,
     actionHint?: AdminActionHint
   ) => Promise<void>;
-  deleteCatalogRowDoc: (id: string) => Promise<void>;
+  deleteCatalogRowDoc: (id: string, displayLabel?: string, kindLabel?: string) => Promise<void>;
   saveReportDoc: (row: GenericRow, actionHint?: AdminActionHint) => Promise<void>;
-  deleteReportDoc: (id: string) => Promise<void>;
+  deleteReportDoc: (id: string, displayLabel?: string) => Promise<void>;
   savePdfBrandingDoc: (config: PdfBrandingConfig) => Promise<void>;
   saveCommunityConfigDoc: (config: SiteCommunityConfig) => Promise<void>;
-  toggleStudentStatusDoc: (uid: string, nextStatus: 'Active' | 'Suspended') => Promise<void>;
-  updateUserRoleDoc: (uid: string, nextRole: UserRole) => Promise<void>;
+  toggleStudentStatusDoc: (
+    uid: string,
+    nextStatus: 'Active' | 'Suspended',
+    displayLabel?: string
+  ) => Promise<void>;
+  updateUserRoleDoc: (
+    uid: string,
+    nextRole: UserRole,
+    displayLabel?: string
+  ) => Promise<void>;
   fetchDashboardCounts: () => Promise<DashboardCountsData>;
   seedFirestoreCatalog: (silent?: boolean) => Promise<void>;
   resetDemoState: () => void;
@@ -408,7 +416,70 @@ const describeAdminAction = (
         : hint === 'create' || (!hint && !existsInList)
           ? 'Created'
           : 'Updated';
-  return `${verb} ${entityLabel}: ${title}`;
+  const cleanTitle = title.trim() || 'Untitled';
+  return `${verb} ${entityLabel}: ${cleanTitle}`;
+};
+
+const getLogTimestampMs = (row: GenericRow): number => {
+  if (typeof row.updatedAtMs === 'number' && row.updatedAtMs > 0) return row.updatedAtMs;
+  const rawTime = String(row.time || '').trim();
+  if (!rawTime) return 0;
+  const parsed = new Date(rawTime.replace(' ', 'T')).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+export interface GroupedActivityLog {
+  id: string;
+  time: string;
+  who: string;
+  act: string;
+  count: number;
+}
+
+export const groupActivityLogs = (logs: GenericRow[]): GroupedActivityLog[] => {
+  const groups: Array<{
+    id: string;
+    time: string;
+    who: string;
+    act: string;
+    count: number;
+    anchorMs: number;
+  }> = [];
+
+  for (const row of logs) {
+    const who = String(row.who || '');
+    const act = String(row.act || '');
+    const time = String(row.time || '');
+    const ms = getLogTimestampMs(row);
+    const existing = groups.find(
+      (g) =>
+        g.who === who &&
+        g.act === act &&
+        ms > 0 &&
+        g.anchorMs > 0 &&
+        Math.abs(g.anchorMs - ms) <= 60_000
+    );
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.push({
+        id: row.id,
+        time,
+        who,
+        act,
+        count: 1,
+        anchorMs: ms,
+      });
+    }
+  }
+
+  return groups.map(({ id, time, who, act, count }) => ({
+    id,
+    time,
+    who,
+    act,
+    count,
+  }));
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -1589,11 +1660,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteQuestionDoc = async (id: string) => {
+  const deleteQuestionDoc = async (id: string, displayLabel?: string) => {
     const path = `questions/${id}`;
+    const docRef = doc(db, 'questions', id);
     try {
-      await deleteDoc(doc(db, 'questions', id));
-      await logAdminActivity(`Deleted question: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const readable = (
+        displayLabel ||
+        String(data.question || 'Question')
+      ).slice(0, 60);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        questions: prev.questions.filter((q) => q.id !== id),
+      }));
+      await logAdminActivity(`Deleted question: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1621,7 +1704,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         minutes: Math.max(1, Math.min(360, Number(item.minutes) || 5)),
         negativeMarking: Math.max(0, Math.min(5, Number(item.negativeMarking) || 0)),
         shuffle: Boolean(item.shuffle ?? item.type === 'Daily Quiz'),
-        published: item.published ?? true,
+        published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       };
       if (item.note) payload.note = item.note.slice(0, 400);
@@ -1702,11 +1785,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteTestDoc = async (id: string) => {
+  const deleteTestDoc = async (id: string, displayLabel?: string) => {
     const path = `tests/${id}`;
+    const docRef = doc(db, 'tests', id);
     try {
-      await deleteDoc(doc(db, 'tests', id));
-      await logAdminActivity(`Deleted test: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const readable = (displayLabel || String(data.name || 'Test')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        tests: prev.tests.filter((tst) => tst.id !== id),
+      }));
+      await logAdminActivity(`Deleted ${String(data.type || 'test')}: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1737,11 +1829,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteMaterialDoc = async (id: string) => {
+  const deleteMaterialDoc = async (id: string, displayLabel?: string) => {
     const path = `materials/${id}`;
+    const docRef = doc(db, 'materials', id);
     try {
-      await deleteDoc(doc(db, 'materials', id));
-      await logAdminActivity(`Deleted study material: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Study Material')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        materials: prev.materials.filter((m) => m.id !== id),
+      }));
+      await logAdminActivity(`Deleted study material: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1766,11 +1866,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteCourseDoc = async (id: string) => {
+  const deleteCourseDoc = async (id: string, displayLabel?: string) => {
     const path = `courses/${id}`;
+    const docRef = doc(db, 'courses', id);
     try {
-      await deleteDoc(doc(db, 'courses', id));
-      await logAdminActivity(`Deleted course: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Course')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.filter((c) => c.id !== id),
+      }));
+      await logAdminActivity(`Deleted course: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1799,11 +1907,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteAffairDoc = async (id: string) => {
+  const deleteAffairDoc = async (id: string, displayLabel?: string) => {
     const path = `affairs/${id}`;
+    const docRef = doc(db, 'affairs', id);
     try {
-      await deleteDoc(doc(db, 'affairs', id));
-      await logAdminActivity(`Deleted current affair: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Current Affair')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        affairs: prev.affairs.filter((a) => a.id !== id),
+      }));
+      await logAdminActivity(`Deleted current affair: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1836,11 +1952,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteJobDoc = async (id: string) => {
+  const deleteJobDoc = async (id: string, displayLabel?: string) => {
     const path = `jobs/${id}`;
+    const docRef = doc(db, 'jobs', id);
     try {
-      await deleteDoc(doc(db, 'jobs', id));
-      await logAdminActivity(`Deleted job update: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Job Update')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        jobs: prev.jobs.filter((j) => j.id !== id),
+      }));
+      await logAdminActivity(`Deleted job update: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1869,11 +1993,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteBannerDoc = async (id: string) => {
+  const deleteBannerDoc = async (id: string, displayLabel?: string) => {
     const path = `banners/${id}`;
+    const docRef = doc(db, 'banners', id);
     try {
-      await deleteDoc(doc(db, 'banners', id));
-      await logAdminActivity(`Deleted banner: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Banner')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        banners: prev.banners.filter((b) => b.id !== id),
+      }));
+      await logAdminActivity(`Deleted banner: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1948,7 +2080,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: item.message.slice(0, 800),
         audience: item.audience.slice(0, 80),
         date: item.date.slice(0, 32),
-        published: item.published ?? true,
+        published: Boolean(item.published),
         updatedAt: serverTimestamp(),
       });
       await logAdminActivity(
@@ -1959,11 +2091,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteNotificationDoc = async (docId: string) => {
+  const deleteNotificationDoc = async (docId: string, displayLabel?: string) => {
     const path = `notifications/${docId}`;
+    const docRef = doc(db, 'notifications', docId);
     try {
-      await deleteDoc(doc(db, 'notifications', docId));
-      await logAdminActivity(`Deleted notification: ${docId}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Notification')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        notificationsList: prev.notificationsList.filter(
+          (n) => (n.docId || `nt_${n.id}`) !== docId
+        ),
+      }));
+      await logAdminActivity(`Deleted notification: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -1994,11 +2136,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteTypingPassageDoc = async (id: string) => {
+  const deleteTypingPassageDoc = async (id: string, displayLabel?: string) => {
     const path = `typingPassages/${id}`;
+    const docRef = doc(db, 'typingPassages', id);
     try {
-      await deleteDoc(doc(db, 'typingPassages', id));
-      await logAdminActivity(`Deleted typing passage: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().title || 'Typing Passage')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        typingPassages: prev.typingPassages.filter((tp) => tp.id !== id),
+      }));
+      await logAdminActivity(`Deleted typing passage: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -2044,11 +2194,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteCatalogRowDoc = async (id: string) => {
+  const deleteCatalogRowDoc = async (
+    id: string,
+    displayLabel?: string,
+    kindLabel?: string
+  ) => {
     const path = `catalogRows/${id}`;
+    const docRef = doc(db, 'catalogRows', id);
     try {
-      await deleteDoc(doc(db, 'catalogRows', id));
-      await logAdminActivity(`Deleted catalog item: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const kind = String(data.kind || '');
+      const resolvedKindLabel =
+        kindLabel ||
+        (kind === 'exams'
+          ? 'exam'
+          : kind === 'subjects'
+            ? 'subject'
+            : kind === 'categories'
+              ? 'category'
+              : kind === 'sitesettings'
+                ? 'site setting'
+                : 'catalog item');
+      const readable = (displayLabel || String(data.col1 || 'Item')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        adminTables: {
+          ...prev.adminTables,
+          exams: (prev.adminTables.exams || []).filter((r) => r.id !== id),
+          subjects: (prev.adminTables.subjects || []).filter((r) => r.id !== id),
+          categories: (prev.adminTables.categories || []).filter((r) => r.id !== id),
+          sitesettings: (prev.adminTables.sitesettings || []).filter((r) => r.id !== id),
+        },
+      }));
+      await logAdminActivity(`Deleted ${resolvedKindLabel}: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
@@ -2075,30 +2256,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteReportDoc = async (id: string) => {
+  const deleteReportDoc = async (id: string, displayLabel?: string) => {
     const path = `reports/${id}`;
+    const docRef = doc(db, 'reports', id);
     try {
-      await deleteDoc(doc(db, 'reports', id));
-      await logAdminActivity(`Deleted report: ${id}`);
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return;
+      const readable = (displayLabel || String(snap.data().name || 'Report')).slice(0, 80);
+      await deleteDoc(docRef);
+      setState((prev) => ({
+        ...prev,
+        adminTables: {
+          ...prev.adminTables,
+          reports: (prev.adminTables.reports || []).filter((r) => r.id !== id),
+        },
+      }));
+      await logAdminActivity(`Deleted report: ${readable}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }
   };
 
-  const toggleStudentStatusDoc = async (uid: string, nextStatus: 'Active' | 'Suspended') => {
+  const resolveUserReadableName = (uid: string, displayLabel?: string) => {
+    if (displayLabel?.trim()) return displayLabel.trim().slice(0, 100);
+    const match = (state.adminTables.students || []).find((s) => s.id === uid);
+    if (!match) return 'User';
+    const name = String(match.name || '').trim();
+    const email = String(match.email || '').trim();
+    if (name && email) return `${name} (${email})`;
+    return name || email || 'User';
+  };
+
+  const toggleStudentStatusDoc = async (
+    uid: string,
+    nextStatus: 'Active' | 'Suspended',
+    displayLabel?: string
+  ) => {
     const path = `users/${uid}`;
+    const readable = resolveUserReadableName(uid, displayLabel);
     try {
       await updateDoc(doc(db, 'users', uid), {
         status: nextStatus,
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Updated student ${uid} status to ${nextStatus}`);
+      await logAdminActivity(`Updated student ${readable} status to ${nextStatus}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     }
   };
 
-  const updateUserRoleDoc = async (uid: string, nextRole: UserRole) => {
+  const updateUserRoleDoc = async (
+    uid: string,
+    nextRole: UserRole,
+    displayLabel?: string
+  ) => {
     if (!isSuperAdmin) {
       throw new Error('Only Super Admin can change user roles.');
     }
@@ -2106,12 +2317,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error('You cannot change your own role.');
     }
     const path = `users/${uid}`;
+    const readable = resolveUserReadableName(uid, displayLabel);
     try {
       await updateDoc(doc(db, 'users', uid), {
         role: nextRole,
         updatedAt: serverTimestamp(),
       });
-      await logAdminActivity(`Updated user ${uid} role to ${nextRole}`);
+      await logAdminActivity(`Changed role for ${readable} to ${nextRole}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     }

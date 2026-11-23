@@ -18,7 +18,9 @@ export const EmptyState: React.FC<{
   subtitle?: string;
   onReset?: () => void;
   resetLabel?: string;
-}> = ({ title, subtitle, onReset, resetLabel }) => {
+  onAction?: () => void;
+  actionLabel?: string;
+}> = ({ title, subtitle, onReset, resetLabel, onAction, actionLabel }) => {
   const { t } = useApp();
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-6 py-12 text-center dark:border-[#24385c] dark:bg-[#122443]">
@@ -29,14 +31,27 @@ export const EmptyState: React.FC<{
       <p className="mt-1 max-w-md text-sm text-slate-600 dark:text-[#9fb0c8]">
         {subtitle || t.common.emptySubtitle}
       </p>
-      {onReset && (
-        <button
-          type="button"
-          onClick={onReset}
-          className="mt-4 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100 dark:hover:bg-[#1b3a6b]"
-        >
-          {resetLabel || t.common.resetFilters}
-        </button>
+      {(onAction || onReset) && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+          {onAction && actionLabel && (
+            <button
+              type="button"
+              onClick={onAction}
+              className="inline-flex items-center justify-center rounded-lg bg-[#102544] px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-[#1b3a6b] dark:bg-[#facc15] dark:text-[#102544]"
+            >
+              {actionLabel}
+            </button>
+          )}
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 dark:border-[#24385c] dark:bg-[#16294b] dark:text-slate-100 dark:hover:bg-[#1b3a6b]"
+            >
+              {resetLabel || t.common.resetFilters}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
